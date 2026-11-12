@@ -1,0 +1,116 @@
+name: clip
+
+on:
+  workflow_dispatch:
+    inputs:
+      jobId:
+        description: Job id (A-Z a-z 0-9 _ -, 1-64)
+        required: true
+        type: string
+      mediaId:
+        description: Media id (A-Z a-z 0-9 _ -, 1-64)
+        required: true
+        type: string
+      env:
+        description: dev or prod
+        required: true
+        type: string
+      youtubeVideoId:
+        description: 11 character YouTube video id (exactly one of this and sourceKey)
+        required: false
+        type: string
+        default: ''
+      sourceKey:
+        description: R2 key sources/<id> (exactly one of this and youtubeVideoId)
+        required: false
+        type: string
+        default: ''
+      startSec:
+        description: Start second, 0..86400
+        required: true
+        type: string
+      durationSec:
+        description: Clip length in seconds, 5..10
+        required: true
+        type: string
+      callbackUrl:
+        description: Admin callback URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clip-${{ inputs.jobId }}
+
+jobs:
+  clip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.env }}
+    # Inputs reach scripts only through env. Nothing below interpolates inputs into a run: block.
+    env:
+      JOB_ID: ${{ inputs.jobId }}
+      MEDIA_ID: ${{ inputs.mediaId }}
+      CLIPPER_ENV: ${{ inputs.env }}
+      YOUTUBE_VIDEO_ID: ${{ inputs.youtubeVideoId }}
+      SOURCE_KEY: ${{ inputs.sourceKey }}
+      START_SEC: ${{ inputs.startSec }}
+      DURATION_SEC: ${{ inputs.durationSec }}
+      CALLBACK_URL: ${{ inputs.callbackUrl }}
+      WORK_DIR: ${{ runner.temp }}/clipper
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        run: bash scripts/validate-inputs.sh
+
+      - name: Prepare work dir
+        run: mkdir -p "$WORK_DIR/out"
+
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        if: ${{ inputs.youtubeVideoId != '' }}
+        with:
+          deno-version: 2.9.8
+
+      - name: Install ffmpeg and yt-dlp
+        run: |
+          if [ -n "$YOUTUBE_VIDEO_ID" ]; then
+            bash scripts/install-tools.sh ffmpeg yt-dlp
+          else
+            bash scripts/install-tools.sh ffmpeg
+          fi
+
+      - name: Fetch source
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: bash scripts/fetch-source.sh
+
+      - name: Encode
+        run: |
+          bash scripts/encode.sh "$(cat "$WORK_DIR/source.path")" "$(cat "$WORK_DIR/source.start")" "$DURATION_SEC" "$WORK_DIR/out"
+
+      - name: Publish to R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: bash scripts/publish.sh "$WORK_DIR/out"
+
+      - name: Callback (succeeded)
+        env:
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+        run: node scripts/callback.mjs success "$WORK_DIR/out"
+
+      - name: Callback (failed)
+        if: ${{ failure() }}
+        env:
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+        run: node scripts/callback.mjs failed

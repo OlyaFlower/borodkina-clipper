@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck scripts/*.sh tests/*.sh
+      - name: Input validation tests
+        run: bash tests/validate.test.sh
+      - name: Node syntax check
+        run: node --check scripts/callback.mjs && node --check tests/callback-server.mjs
+
+  encode-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.tools/bin
+      R2_ACCESS_KEY_ID: ci-minio-user
+      R2_SECRET_ACCESS_KEY: ci-minio-secret-not-real
+      R2_ENDPOINT: http://127.0.0.1:9000
+      R2_ACCOUNT_ID: unused
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install pinned ffmpeg
+        run: bash scripts/install-tools.sh ffmpeg
+      - name: Generate fixture (1080p60, 12 s, with audio)
+        run: |
+          ffmpeg -hide_banner -loglevel error -nostdin -y \
+            -f lavfi -i "testsrc2=size=1920x1080:rate=60:duration=12" \
+            -f lavfi -i "sine=frequency=440:duration=12" \
+            -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "$RUNNER_TEMP/fixture.mp4"
+      - name: Encode with start 2, duration 8
+        run: bash scripts/encode.sh "$RUNNER_TEMP/fixture.mp4" 2 8 "$RUNNER_TEMP/out"
+      - name: Assert all renditions exist and verify again
+        run: |
+          for f in 1280.av1.webm 640.av1.webm 1280.h264.mp4 640.h264.mp4 poster.webp; do
+            test -s "$RUNNER_TEMP/out/$f" || { echo "missing $f"; exit 1; }
+          done
+          ls -l "$RUNNER_TEMP/out"
+          bash scripts/verify.sh "$RUNNER_TEMP/out" 8
+          p="$(ffprobe -v error -select_streams v:0 -show_entries stream=profile,level -of csv=p=0 "$RUNNER_TEMP/out/1280.h264.mp4")"
+          echo "h264 profile,level: $p"
+          [ "$p" = "High,32" ]
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER="$R2_ACCESS_KEY_ID" -e MINIO_ROOT_PASSWORD="$R2_SECRET_ACCESS_KEY" \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for _ in $(seq 1 30); do
+            curl -fs http://127.0.0.1:9000/minio/health/ready && exit 0
+            sleep 1
+          done
+          docker logs minio
+          exit 1
+      - name: Publish and callback against MinIO
+        run: bash tests/publish-callback.test.sh "$RUNNER_TEMP/out"
