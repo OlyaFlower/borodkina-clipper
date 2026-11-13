@@ -60,7 +60,7 @@ yt-dlp, deno and ffmpeg and publishes it to `ghcr.io/olyaflower/borodkina-clippe
 brew install container      # once
 container system start      # once after each reboot, if it is not running
 mkdir -p ~/Downloads/borodkina-clips
-container run --rm -v ~/Downloads/borodkina-clips:/out \
+container run --rm -m 4G -v ~/Downloads/borodkina-clips:/out \
   ghcr.io/olyaflower/borodkina-clipper:<sha> clip --youtube <id> --start <s> --end <e>
 ```
 
@@ -68,6 +68,10 @@ container run --rm -v ~/Downloads/borodkina-clips:/out \
 `~/Downloads/borodkina-clips/<id>-<s>-<e>/`: the renditions, `poster.webp` and `clip.json`. An existing folder of the same name is replaced.
 The first run makes macOS ask whether `container` may access the Downloads folder; allow it. If YouTube refuses the download
 (sign-in or bot check) the command prints a message and exits with code 3.
+
+`-m 4G` matters: Apple `container` gives a VM 1 GB by default, and cutting a 1080p AV1 HLS stream (YouTube format 699)
+exhausts it, so the VM freezes on `[download] Destination: …` and the `container` service stops answering until
+`container system stop` / `start`. With 4 GB the same clip takes about half a minute.
 
 `docker run` works the same way with the same arguments. For tests only, `clip --file <video> --start <s> --end <e>` encodes a local file instead of downloading.
 
