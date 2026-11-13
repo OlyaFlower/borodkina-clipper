@@ -51,6 +51,26 @@ Create two GitHub Environments in the repo settings, `dev` and `prod`, each with
 
 The admin dispatches with a fine-grained token that has only `Actions: read and write` on this repository.
 
+## Cutting a YouTube clip on your Mac
+
+GitHub runners are often refused by YouTube; your home IP is not. The `image` workflow builds a linux/arm64 image with
+yt-dlp, deno and ffmpeg and publishes it to `ghcr.io/olyaflower/borodkina-clipper` (tags: the full commit SHA and `latest`).
+
+```sh
+brew install container      # once
+container system start      # once after each reboot, if it is not running
+mkdir -p ~/Downloads/borodkina-clips
+container run --rm -v ~/Downloads/borodkina-clips:/out \
+  ghcr.io/olyaflower/borodkina-clipper:<sha> clip --youtube <id> --start <s> --end <e>
+```
+
+`<id>` is the 11-character video id, `<s>` and `<e>` are whole seconds with `5 <= e - s <= 10`. The result is in
+`~/Downloads/borodkina-clips/<id>-<s>-<e>/`: the renditions, `poster.webp` and `clip.json`. An existing folder of the same name is replaced.
+The first run makes macOS ask whether `container` may access the Downloads folder; allow it. If YouTube refuses the download
+(sign-in or bot check) the command prints a message and exits with code 3.
+
+`docker run` works the same way with the same arguments. For tests only, `clip --file <video> --start <s> --end <e>` encodes a local file instead of downloading.
+
 ## Security notes
 
 - The repository is public, so Actions logs are public. Nothing secret is printed; secrets are only set on the steps that need them.

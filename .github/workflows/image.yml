@@ -1,0 +1,67 @@
+name: image
+
+# Builds the linux/arm64 image the owner runs on a Mac with `container` or docker.
+# Pull requests build and smoke-test only; pushes to main also publish to ghcr.io.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/olyaflower/borodkina-clipper
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Argument validation tests
+        run: bash tests/clip.test.sh
+
+      - name: Build
+        run: docker build --platform linux/arm64 -t "$IMAGE:test" .
+
+      - name: Smoke test (encode a generated fixture, check clip.json)
+        run: |
+          mkdir -p "$RUNNER_TEMP/smoke" && chmod 777 "$RUNNER_TEMP/smoke"
+          docker run --rm -v "$RUNNER_TEMP/smoke:/out" --entrypoint ffmpeg "$IMAGE:test" \
+            -hide_banner -loglevel error -nostdin -y \
+            -f lavfi -i "testsrc2=size=1920x1080:rate=60:duration=12" \
+            -c:v libx264 -pix_fmt yuv420p /out/fixture.mp4
+          docker run --rm -v "$RUNNER_TEMP/smoke:/out" "$IMAGE:test" \
+            clip --file /out/fixture.mp4 --start 2 --end 10
+          dir="$RUNNER_TEMP/smoke/file-2-10"
+          jq -e '.version == 1 and .startSec == 2 and .endSec == 10 and .durationMs == 8000
+            and (.renditions | length) >= 2 and (.renditions | map(.file) | index("1280.h264.mp4") != null)
+            and .poster.bytes > 0 and (.tools.ytDlp | length) > 0 and (.tools.ffmpeg | length) > 0
+            and (keys | sort) == ["durationMs","endSec","poster","renditions","startSec","tools","version","youtubeVideoId"]' \
+            "$dir/clip.json"
+          test -s "$dir/poster.webp"
+          for f in $(jq -r '.renditions[].file' "$dir/clip.json"); do test -s "$dir/$f"; done
+          docker run --rm --entrypoint sh "$IMAGE:test" -c 'yt-dlp --version && deno --version'
+
+      - name: Log in to ghcr.io
+        if: ${{ github.event_name == 'push' }}
+        env:
+          GITHUB_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: echo "$GITHUB_TOKEN_VALUE" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Push (full commit SHA and latest)
+        if: ${{ github.event_name == 'push' }}
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          docker tag "$IMAGE:test" "$IMAGE:$SHA"
+          docker tag "$IMAGE:test" "$IMAGE:latest"
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:latest"
