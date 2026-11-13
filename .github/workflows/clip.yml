@@ -59,7 +59,6 @@ jobs:
       START_SEC: ${{ inputs.startSec }}
       DURATION_SEC: ${{ inputs.durationSec }}
       CALLBACK_URL: ${{ inputs.callbackUrl }}
-      WORK_DIR: ${{ runner.temp }}/clipper
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,8 +67,11 @@ jobs:
       - name: Validate inputs
         run: bash scripts/validate-inputs.sh
 
+      # The runner context is not available in job-level env, so the work dir is set here.
       - name: Prepare work dir
-        run: mkdir -p "$WORK_DIR/out"
+        run: |
+          echo "WORK_DIR=$RUNNER_TEMP/clipper" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/clipper/out"
 
       - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         if: ${{ inputs.youtubeVideoId != '' }}

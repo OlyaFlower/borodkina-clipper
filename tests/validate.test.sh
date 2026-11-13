@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# The injection cases are single-quoted on purpose: they must reach the validator unexpanded.
+# shellcheck disable=SC2016
 # Unit tests for scripts/validate-inputs.sh: good inputs pass, bad and hostile inputs fail.
 set -uo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

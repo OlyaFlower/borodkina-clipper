@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Integration test: publish.sh against a MinIO at $R2_ENDPOINT, then callback.mjs against a local HMAC-verifying server.
-# Needs: MinIO running with $R2_ACCESS_KEY_ID/$R2_SECRET_ACCESS_KEY, aws CLI, node, jq, and an encoded dir ($1).
+# Integration test: publish.sh against an S3 stand-in (moto) at $R2_ENDPOINT, then callback.mjs against a local HMAC-verifying server.
+# Needs: an S3 stand-in running with $R2_ACCESS_KEY_ID/$R2_SECRET_ACCESS_KEY, aws CLI, node, jq, and an encoded dir ($1).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$here/.."
@@ -28,10 +28,10 @@ echo "publish ok"
 
 # ---- source download path (file mode)
 aws --endpoint-url "$R2_ENDPOINT" s3 cp "$out/1280.h264.mp4" "s3://$R2_BUCKET/sources/abc_1" >/dev/null
-WORK_DIR="$work/fetch" SOURCE_KEY=sources/abc_1 START_SEC=0 YOUTUBE_VIDEO_ID= \
+WORK_DIR="$work/fetch" SOURCE_KEY=sources/abc_1 START_SEC=0 YOUTUBE_VIDEO_ID='' \
   bash "$root/scripts/fetch-source.sh"
 [[ -s "$work/fetch/source.path" ]] || { echo "fetch-source wrote no path"; exit 1; }
-if WORK_DIR="$work/fetch2" SOURCE_KEY=sources/missing START_SEC=0 YOUTUBE_VIDEO_ID= \
+if WORK_DIR="$work/fetch2" SOURCE_KEY=sources/missing START_SEC=0 YOUTUBE_VIDEO_ID='' \
   bash "$root/scripts/fetch-source.sh" 2>/dev/null; then echo "missing source should fail"; exit 1; fi
 [[ "$(cat "$work/fetch2/error-code")" == source_invalid ]] || { echo "expected source_invalid"; exit 1; }
 echo "fetch ok"

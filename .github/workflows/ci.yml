@@ -16,7 +16,7 @@ jobs:
         with:
           persist-credentials: false
       - name: shellcheck
-        run: shellcheck scripts/*.sh tests/*.sh
+        run: shellcheck -x scripts/*.sh tests/*.sh
       - name: Input validation tests
         run: bash tests/validate.test.sh
       - name: Node syntax check
@@ -27,8 +27,8 @@ jobs:
     timeout-minutes: 20
     env:
       TOOLS_DIR: ${{ github.workspace }}/.tools/bin
-      R2_ACCESS_KEY_ID: ci-minio-user
-      R2_SECRET_ACCESS_KEY: ci-minio-secret-not-real
+      R2_ACCESS_KEY_ID: ci-s3-user
+      R2_SECRET_ACCESS_KEY: ci-s3-secret-not-real
       R2_ENDPOINT: http://127.0.0.1:9000
       R2_ACCOUNT_ID: unused
     steps:
@@ -58,16 +58,16 @@ jobs:
           p="$(ffprobe -v error -select_streams v:0 -show_entries stream=profile,level -of csv=p=0 "$RUNNER_TEMP/out/1280.h264.mp4")"
           echo "h264 profile,level: $p"
           [ "$p" = "High,32" ]
-      - name: Start MinIO
+      # A local S3 stand-in for R2 (MinIO no longer publishes images). It accepts any keys.
+      - name: Start S3 stand-in (moto)
         run: |
-          docker run -d --name minio -p 127.0.0.1:9000:9000 \
-            -e MINIO_ROOT_USER="$R2_ACCESS_KEY_ID" -e MINIO_ROOT_PASSWORD="$R2_SECRET_ACCESS_KEY" \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          python3 -m pip install --quiet "moto[server]==5.2.5"
+          nohup moto_server -H 127.0.0.1 -p 9000 > "$RUNNER_TEMP/moto.log" 2>&1 &
           for _ in $(seq 1 30); do
-            curl -fs http://127.0.0.1:9000/minio/health/ready && exit 0
+            curl -fs http://127.0.0.1:9000/moto-api/ > /dev/null && exit 0
             sleep 1
           done
-          docker logs minio
+          cat "$RUNNER_TEMP/moto.log"
           exit 1
-      - name: Publish and callback against MinIO
+      - name: Publish and callback against the S3 stand-in
         run: bash tests/publish-callback.test.sh "$RUNNER_TEMP/out"

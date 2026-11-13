@@ -62,5 +62,5 @@ The admin dispatches with a fine-grained token that has only `Actions: read and 
 ## Tests
 
 `.github/workflows/ci.yml` runs shellcheck, input validation tests (including injection attempts), a real encode of a generated 1080p60 fixture
-with all ffprobe assertions, and the publish and callback path against MinIO and a local HMAC-verifying server.
+with all ffprobe assertions, and the publish and callback path against a local S3 stand-in (moto) and a local HMAC-verifying server.
 The `clip` workflow is never triggered by CI.
