@@ -38,8 +38,52 @@ Retried 3 times with backoff on network errors and 5xx.
 ```
 
 Error codes: `youtube_blocked` (bot check or HTTP 429), `source_invalid` (private, removed, unreadable or too short source),
-`encode_failed` (anything else, also publish errors). Messages are fixed strings of at most 500 characters.
+`encode_failed` (anything else, also publish errors); motion jobs can also send `render_failed`. Messages are fixed strings of at most 500 characters.
 A cancelled or timed-out job (15 minutes) sends no callback; the admin should expire such jobs itself.
+
+## Motion videos
+
+Workflow `.github/workflows/motion.yml` turns an event cover into an 8-second silent, seamlessly looping preview video
+with [HyperFrames](https://hyperframes.heygen.com/packages/cli) (HTML rendered to video by headless Chrome and FFmpeg).
+It uses the same GitHub Environments, secrets, R2 layout, renditions and callback signing as `clip`.
+
+`workflow_dispatch` inputs (all strings), checked by `scripts/validate-inputs.sh motion`:
+
+| Input | Rule |
+| --- | --- |
+| `jobId`, `mediaId` | `^[A-Za-z0-9_-]{1,64}$` |
+| `env` | `dev` or `prod` (also selects the GitHub Environment) |
+| `sourceKey` | `^sources/[A-Za-z0-9_-]{1,64}$` |
+| `callbackUrl` | same rule as `clip` |
+
+Before dispatching, the admin uploads two objects to R2:
+
+- `sources/<id>`: the cover, JPEG, PNG or WebP (recognised by its first bytes), at most 20 MiB. It is scaled up and
+  centre-cropped to fill 1920x1080.
+- `sources/<id>.json`: the brief, a JSON object of at most 64 KiB. Its fields are defined by the authoring step
+  (a later package); today the job only checks that it exists and is an object.
+
+Steps: validate, install the pinned ffmpeg and `motion/` (`npm ci`, HyperFrames and GSAP pinned exactly in
+`motion/package-lock.json`), fetch the cover and brief (`scripts/fetch-cover.sh`), author the composition (for now always
+`motion/compositions/smoke`, recorded as fallback authoring), render with `scripts/motion-render.sh` (1920x1080, 30 fps,
+240 frames, `--quality delivery`, 3 workers; frame 0 is the untouched cover and the last frame returns to it), encode and
+verify with the same `encode.sh`/`verify.sh` as `clip` (start 0, duration 8), publish to `videos/<mediaId>/` and call back.
+The job times out after 35 minutes.
+
+Outputs: the same five files as `clip` (`1280.av1.webm`, `640.av1.webm`, `1280.h264.mp4`, `640.h264.mp4`, `poster.webp`),
+duration 8 s, and the poster is frame 0, the cover itself.
+
+The success callback carries one more field, read from `$WORK_DIR/motion.json` (refused unless it has exactly these keys):
+
+```json
+{"status":"succeeded","renditions":[{"file":"1280.av1.webm","bytes":123}],"poster":{"bytes":456},"durationMs":8000,
+ "motion":{"authoring":"fallback","model":null,"kitVersion":"smoke-1"}}
+```
+
+`authoring` is `fallback` (a fixed composition) or `claude` (written by Claude, `model` then names the model);
+`kitVersion` names the composition kit. Error codes: `source_invalid` (cover or brief missing, unreadable or too large),
+`render_failed` (HyperFrames setup, the render itself, or the master's 1920x1080 / 30 fps / 240-frame check; also a
+composition whose WebGL context cannot be created), `encode_failed` (renditions or publishing).
 
 ## Setup
 
@@ -87,4 +131,8 @@ exhausts it, so the VM freezes on `[download] Destination: …` and the `contain
 
 `.github/workflows/ci.yml` runs shellcheck, input validation tests (including injection attempts), a real encode of a generated 1080p60 fixture
 with all ffprobe assertions, and the publish and callback path against a local S3 stand-in (moto) and a local HMAC-verifying server.
-The `clip` workflow is never triggered by CI.
+The `motion-render` job renders `motion/compositions/smoke` with `tests/fixtures/cover.jpg` (a generated test pattern)
+through `tests/motion-smoke.test.sh` and checks that every output lasts 8 s within one frame, frame 0 matches the cover
+(SSIM >= 0.95), the last frame matches frame 0 (SSIM >= 0.98) and the middle frame differs (SSIM < 0.95); the render
+time and SSIM values go to the job summary.
+The `clip` and `motion` workflows are never triggered by CI.

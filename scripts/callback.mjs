@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Usage: node callback.mjs success <outdir>
+// Usage: node callback.mjs success <outdir>   (merges $WORK_DIR/motion.json as "motion" if present)
 //        node callback.mjs failed            (reads $WORK_DIR/error-code and error-message if present)
 // Env: CALLBACK_URL CLIPPER_ENV CLIPPER_CALLBACK_SECRET DURATION_SEC [WORK_DIR]
 // Posts a signed JSON callback to the admin. No dependencies. Never prints the secret or the signature.
@@ -11,13 +11,16 @@ const PREFIXES = {
   dev: 'https://dev-admin.borodkinamusic.com/api/v1/video-jobs/',
   prod: 'https://admin.borodkinamusic.com/api/v1/video-jobs/',
 };
-const CODES = ['youtube_blocked', 'source_invalid', 'encode_failed'];
+const CODES = ['youtube_blocked', 'source_invalid', 'encode_failed', 'render_failed'];
 const RENDITIONS = ['1280.av1.webm', '640.av1.webm', '1280.h264.mp4', '640.h264.mp4'];
 const DEFAULT_MESSAGES = {
   youtube_blocked: 'YouTube blocked the download from this runner',
   source_invalid: 'The source video is not usable',
   encode_failed: 'Encoding or publishing the clip failed',
+  render_failed: 'Rendering the motion video failed',
 };
+const AUTHORING = ['fallback', 'claude'];
+const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,99}$/;
 
 function die(message) {
   console.error(`callback: ${message}`);
@@ -42,6 +45,30 @@ function readOptional(path) {
   }
 }
 
+// Motion jobs describe how the video was authored in $WORK_DIR/motion.json:
+// {"authoring":"fallback"|"claude","model":string|null,"kitVersion":string}. Anything else is refused.
+function readMotion() {
+  const work = process.env.WORK_DIR ?? '';
+  if (!work) return undefined;
+  const raw = readOptional(join(work, 'motion.json'));
+  if (!raw) return undefined;
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    die('motion.json is not JSON');
+  }
+  const keys = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).sort() : [];
+  const valid =
+    keys.join(',') === 'authoring,kitVersion,model' &&
+    AUTHORING.includes(value.authoring) &&
+    (value.model === null || (typeof value.model === 'string' && TOKEN.test(value.model))) &&
+    typeof value.kitVersion === 'string' &&
+    TOKEN.test(value.kitVersion);
+  if (!valid) die('motion.json does not match the motion schema');
+  return { authoring: value.authoring, model: value.model, kitVersion: value.kitVersion };
+}
+
 function buildBody(mode, arg) {
   if (mode === 'success') {
     const dir = arg ?? die('outdir required');
@@ -61,7 +88,10 @@ function buildBody(mode, arg) {
     }
     const seconds = Number(process.env.DURATION_SEC);
     if (!Number.isInteger(seconds) || seconds < 5 || seconds > 10) die('bad DURATION_SEC');
-    return { status: 'succeeded', renditions, poster, durationMs: seconds * 1000 };
+    const body = { status: 'succeeded', renditions, poster, durationMs: seconds * 1000 };
+    const motion = readMotion();
+    if (motion) body.motion = motion;
+    return body;
   }
   if (mode === 'failed') {
     const work = process.env.WORK_DIR ?? '';

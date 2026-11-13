@@ -71,3 +71,24 @@ jobs:
           exit 1
       - name: Publish and callback against the S3 stand-in
         run: bash tests/publish-callback.test.sh "$RUNNER_TEMP/out"
+
+  # Renders the smoke composition with HyperFrames (headless Chrome, software WebGL) directly on the
+  # runner, no Docker: frame 0 = cover, last frame = frame 0, 8 s outputs. Render time goes to the summary.
+  motion-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.tools/bin
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Install pinned ffmpeg and HyperFrames
+        run: |
+          bash scripts/install-tools.sh ffmpeg
+          npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+      - name: Render the smoke composition with the fixture cover, encode, verify and check the loop
+        run: bash tests/motion-smoke.test.sh

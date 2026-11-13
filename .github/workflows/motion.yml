@@ -1,0 +1,106 @@
+name: motion
+
+# Turns an event cover into an 8-second silent seamless-loop preview video with HyperFrames.
+# Dispatched by the admin; see "Motion videos" in README.md for the protocol.
+on:
+  workflow_dispatch:
+    inputs:
+      jobId:
+        description: Job id (A-Z a-z 0-9 _ -, 1-64)
+        required: true
+        type: string
+      mediaId:
+        description: Media id (A-Z a-z 0-9 _ -, 1-64)
+        required: true
+        type: string
+      env:
+        description: dev or prod
+        required: true
+        type: string
+      sourceKey:
+        description: R2 key sources/<id> of the cover; the brief is sources/<id>.json
+        required: true
+        type: string
+      callbackUrl:
+        description: Admin callback URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: motion-${{ inputs.jobId }}
+
+jobs:
+  motion:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: ${{ inputs.env }}
+    # Inputs reach scripts only through env. Nothing below interpolates inputs into a run: block.
+    env:
+      JOB_ID: ${{ inputs.jobId }}
+      MEDIA_ID: ${{ inputs.mediaId }}
+      CLIPPER_ENV: ${{ inputs.env }}
+      SOURCE_KEY: ${{ inputs.sourceKey }}
+      CALLBACK_URL: ${{ inputs.callbackUrl }}
+      DURATION_SEC: '8'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        run: bash scripts/validate-inputs.sh motion
+
+      # The runner context is not available in job-level env, so the work dir is set here.
+      - name: Prepare work dir
+        run: |
+          echo "WORK_DIR=$RUNNER_TEMP/motion" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/motion"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      - name: Install ffmpeg and HyperFrames
+        run: |
+          bash scripts/install-tools.sh ffmpeg
+          npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+
+      - name: Fetch cover and brief
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: bash scripts/fetch-cover.sh
+
+      # Placeholder for the prepare and author steps of later packages: until then every job renders
+      # the smoke composition with the fetched cover, recorded as fallback authoring.
+      - name: Author composition (fallback)
+        run: |
+          echo "COMPOSITION_DIR=$GITHUB_WORKSPACE/motion/compositions/smoke" >> "$GITHUB_ENV"
+          echo '{"authoring":"fallback","model":null,"kitVersion":"smoke-1"}' > "$WORK_DIR/motion.json"
+
+      - name: Render, encode and verify
+        run: bash scripts/motion-render.sh "$COMPOSITION_DIR" "$WORK_DIR/source/cover"
+
+      - name: Publish to R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: bash scripts/publish.sh "$WORK_DIR/out"
+
+      - name: Callback (succeeded)
+        env:
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+        run: node scripts/callback.mjs success "$WORK_DIR/out"
+
+      - name: Callback (failed)
+        if: ${{ failure() }}
+        env:
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+        run: node scripts/callback.mjs failed
