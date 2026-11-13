@@ -28,7 +28,7 @@ jobs:
         run: bash tests/clip.test.sh
 
       - name: Build
-        run: docker build --platform linux/arm64 -t "$IMAGE:test" .
+        run: docker build --platform linux/arm64 -f Containerfile -t "$IMAGE:test" .
 
       - name: Smoke test (encode a generated fixture, check clip.json)
         run: |
