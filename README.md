@@ -133,6 +133,6 @@ exhausts it, so the VM freezes on `[download] Destination: …` and the `contain
 with all ffprobe assertions, and the publish and callback path against a local S3 stand-in (moto) and a local HMAC-verifying server.
 The `motion-render` job renders `motion/compositions/smoke` with `tests/fixtures/cover.jpg` (a generated test pattern)
 through `tests/motion-smoke.test.sh` and checks that every output lasts 8 s within one frame, frame 0 matches the cover
-(SSIM >= 0.95), the last frame matches frame 0 (SSIM >= 0.98) and the middle frame differs (SSIM < 0.95); the render
+(SSIM >= 0.98), the last frame matches frame 0 (SSIM >= 0.98) and the middle frame differs (SSIM < 0.95); the render
 time and SSIM values go to the job summary.
 The `clip` and `motion` workflows are never triggered by CI.

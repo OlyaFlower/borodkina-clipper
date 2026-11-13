@@ -2,8 +2,8 @@
 # Integration test: renders motion/compositions/smoke with the fixture cover through scripts/motion-render.sh
 # (HyperFrames render, encode.sh, verify.sh) and checks the loop:
 #   - all five outputs exist and every video lasts 8 s within one frame;
-#   - frame 0 matches the cover (SSIM >= 0.95): the effects start at zero intensity and the transform is identity,
-#     so only H.264 (CRF, yuv420p chroma subsampling) loss remains. That loss keeps SSIM around 0.97-0.99 on this
+#   - frame 0 matches the cover (SSIM >= 0.98): the effects start at zero intensity and the transform is identity,
+#     so only H.264 (CRF, yuv420p chroma subsampling) loss remains. That loss keeps SSIM at about 0.995 on this
 #     saturated test pattern, while a 1.06 push-in, a light sweep or the dust left on at frame 0 drops it well below;
 #   - the last frame matches frame 0 (SSIM >= 0.98), so the 8 s loop has no visible jump;
 #   - the middle frame differs from frame 0 (SSIM < 0.95), so the composition really animates.
@@ -65,7 +65,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "| Measure | Value |"
     echo "| --- | --- |"
     echo "| HyperFrames render (wall) | ${render_seconds} s |"
-    echo "| SSIM frame 0 vs cover (>= 0.95) | $cover_ssim |"
+    echo "| SSIM frame 0 vs cover (>= 0.98) | $cover_ssim |"
     echo "| SSIM frame 0 vs last frame (>= 0.98) | $loop_ssim |"
     echo "| SSIM frame 0 vs middle frame (< 0.95) | $mid_ssim |"
     for f in 1280.av1.webm 640.av1.webm 1280.h264.mp4 640.h264.mp4 poster.webp; do
@@ -78,7 +78,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 
-awk -v s="$cover_ssim" 'BEGIN { exit !(s >= 0.95) }' || { echo "frame 0 does not match the cover"; exit 1; }
+awk -v s="$cover_ssim" 'BEGIN { exit !(s >= 0.98) }' || { echo "frame 0 does not match the cover"; exit 1; }
 awk -v s="$loop_ssim" 'BEGIN { exit !(s >= 0.98) }' || { echo "the last frame does not match frame 0"; exit 1; }
 awk -v s="$mid_ssim" 'BEGIN { exit !(s < 0.95) }' || { echo "the middle frame barely differs from frame 0"; exit 1; }
 echo "motion smoke test passed (render ${render_seconds} s)"
