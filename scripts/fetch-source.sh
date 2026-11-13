@@ -49,6 +49,13 @@ fi
 codec="$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of csv=p=0 "$file" 2>/dev/null || true)"
 [[ -n "$codec" ]] || fail source_invalid "The source has no readable video stream"
 length="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$file" 2>/dev/null || true)"
+# Browser recordings (MediaRecorder WebM) carry no duration in their header ("N/A"). Then the
+# length is the last video packet's end: pts plus duration, read by demuxing only (no decoding).
+if ! [[ "$length" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+  length="$(ffprobe -v error -select_streams v:0 -show_entries packet=pts_time,duration_time \
+    -of csv=p=0 "$file" 2>/dev/null \
+    | awk -F, '$1 ~ /^[0-9.]+$/ { end = $1 + ($2 ~ /^[0-9.]+$/ ? $2 : 0); if (end > max) max = end } END { if (max > 0) print max }' || true)"
+fi
 awk -v l="${length:-0}" -v need="$((seek + dur))" 'BEGIN { exit !(l + 0.3 >= need) }' \
   || fail source_invalid "The source is shorter than the requested clip"
 

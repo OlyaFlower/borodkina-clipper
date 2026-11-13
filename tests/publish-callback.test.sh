@@ -36,6 +36,20 @@ if WORK_DIR="$work/fetch2" SOURCE_KEY=sources/missing START_SEC=0 YOUTUBE_VIDEO_
 [[ "$(cat "$work/fetch2/error-code")" == source_invalid ]] || { echo "expected source_invalid"; exit 1; }
 echo "fetch ok"
 
+# ---- a browser recording (MediaRecorder WebM) has no duration in its header: the length comes from
+# its packets, so a 10 s recording passes for start 1 and is too short for start 5.
+ffmpeg -hide_banner -loglevel error -nostdin -y -f lavfi -i "testsrc2=size=640x360:rate=30:duration=10" \
+  -c:v libvpx-vp9 -deadline realtime -b:v 300k -f webm -live 1 "$work/live.webm"
+[[ "$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$work/live.webm")" == N/A ]] \
+  || { echo "fixture should have no header duration"; exit 1; }
+aws --endpoint-url "$R2_ENDPOINT" s3 cp "$work/live.webm" "s3://$R2_BUCKET/sources/live_1" >/dev/null
+WORK_DIR="$work/live1" SOURCE_KEY=sources/live_1 START_SEC=1 YOUTUBE_VIDEO_ID='' \
+  bash "$root/scripts/fetch-source.sh"
+[[ -s "$work/live1/source.path" ]] || { echo "a WebM without a header duration should be accepted"; exit 1; }
+if WORK_DIR="$work/live5" SOURCE_KEY=sources/live_1 START_SEC=5 YOUTUBE_VIDEO_ID='' \
+  bash "$root/scripts/fetch-source.sh" 2>/dev/null; then echo "a 10 s WebM is too short for 5 + 8 s"; exit 1; fi
+echo "fetch without header duration ok"
+
 # ---- callbacks
 mkdir "$work/recv"
 FAIL_FIRST=1 node "$here/callback-server.mjs" 18080 "$work/recv" & server_pid=$!
