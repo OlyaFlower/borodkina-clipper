@@ -1,0 +1,107 @@
+<!doctype html>
+<html
+  lang="en"
+  data-composition-variables='[
+    {"id":"intensity","type":"number","label":"Effect intensity (1 = calm default)","default":1},
+    {"id":"seed","type":"number","label":"Particle seed","default":20261114}
+  ]'
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Motion kit · default loop · 8 seconds</title>
+    <!--
+      The fallback composition of motion kit 1: depth parallax with a tiny camera orbit, a soft light
+      sweep, paper grain and a vignette (kit/parallax.js), and palette-coloured dust and bokeh
+      (kit/particles.js). scripts/motion-render.sh copies motion/kit/lib into kit/, the pinned GSAP into
+      assets/vendor/ and the prepared cover, depth and scene into assets/.
+    -->
+    <script src="assets/vendor/gsap.min.js"></script>
+    <script src="assets/scene.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #000;
+      }
+      #kit-default {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      #kit-image,
+      #kit-particles {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+      }
+      #kit-image {
+        z-index: 1;
+      }
+      #kit-particles {
+        z-index: 2;
+        mix-blend-mode: screen;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="kit-default"
+      data-composition-id="kit-default"
+      data-start="0"
+      data-width="1920"
+      data-height="1080"
+      data-duration="8"
+      data-fps="30"
+    >
+      <canvas
+        id="kit-image"
+        class="clip"
+        data-start="0"
+        data-duration="8"
+        data-track-index="0"
+        data-track-kind="graphics"
+        width="1920"
+        height="1080"
+      ></canvas>
+      <canvas
+        id="kit-particles"
+        class="clip"
+        data-start="0"
+        data-duration="8"
+        data-track-index="1"
+        data-track-kind="graphics"
+        width="1920"
+        height="1080"
+      ></canvas>
+    </div>
+    <script type="module">
+      import { createParallax } from './kit/parallax.js';
+      import { createParticles } from './kit/particles.js';
+      import { loadImage, run, scene, variables } from './kit/scene.js';
+
+      // run() registers the paused timeline as window.__timelines['kit-default'] once the images are in.
+      window.__timelines = window.__timelines || {};
+      run('kit-default', async () => {
+        const meta = scene();
+        const vars = variables();
+        const intensity = Number.isFinite(vars.intensity) ? Math.min(Math.max(vars.intensity, 0), 2) : 1;
+        const seed = Number.isFinite(vars.seed) ? vars.seed : 20261114;
+        const [cover, depth, background] = await Promise.all([
+          loadImage('assets/cover.jpg'),
+          loadImage('assets/depth.png'),
+          meta.files?.background ? loadImage(`assets/${meta.files.background}`) : null,
+        ]);
+        return [
+          createParallax(document.getElementById('kit-image'), { cover, depth, background, scene: meta, intensity }),
+          createParticles(document.getElementById('kit-particles'), { scene: meta, seed, intensity }),
+        ];
+      });
+    </script>
+  </body>
+</html>

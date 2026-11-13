@@ -63,6 +63,16 @@ jobs:
         with:
           node-version: 24
 
+      # Python 3.12 for the prepare step; its packages and models are pinned by sha256 and cached.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/borodkina-motion
+          key: motion-prepare-${{ runner.os }}-${{ hashFiles('motion/prepare/requirements.txt', 'motion/prepare/models.env') }}
+
       - name: Install ffmpeg and HyperFrames
         run: |
           bash scripts/install-tools.sh ffmpeg
@@ -76,15 +86,22 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: bash scripts/fetch-cover.sh
 
-      # Placeholder for the prepare and author steps of later packages: until then every job renders
-      # the smoke composition with the fetched cover, recorded as fallback authoring.
+      # Crop or extend the cover to 1920x1080 and find its depth, faces, palette and focal point.
+      - name: Prepare cover
+        run: bash scripts/motion-prepare.sh "$WORK_DIR/source/cover" "$WORK_DIR/prepare"
+
+      # Placeholder for the author step of a later package: until then every job renders the kit's
+      # default composition, recorded as fallback authoring.
       - name: Author composition (fallback)
         run: |
-          echo "COMPOSITION_DIR=$GITHUB_WORKSPACE/motion/compositions/smoke" >> "$GITHUB_ENV"
-          echo '{"authoring":"fallback","model":null,"kitVersion":"smoke-1"}' > "$WORK_DIR/motion.json"
+          echo "COMPOSITION_DIR=$GITHUB_WORKSPACE/motion/kit/default" >> "$GITHUB_ENV"
+          echo '{"authoring":"fallback","model":null,"kitVersion":"kit-1"}' > "$WORK_DIR/motion.json"
 
       - name: Render, encode and verify
-        run: bash scripts/motion-render.sh "$COMPOSITION_DIR" "$WORK_DIR/source/cover"
+        run: bash scripts/motion-render.sh "$COMPOSITION_DIR" "$WORK_DIR/prepare"
+
+      - name: Quality gates
+        run: bash scripts/motion-gates.sh
 
       - name: Publish to R2
         env:

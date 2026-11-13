@@ -2,3 +2,4 @@ node_modules/
 .work/
 .hyperframes/
 renders/
+__pycache__/
