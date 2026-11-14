@@ -47,7 +47,8 @@ block, parameter, rhythm and the block API.
    (`runtime.errorCount` must be 0; GL "performance" warnings are harmless).
 5. **Snapshot**: `npx --prefix motion hyperframes snapshot work/project --at 0,2,4,6,8 --no-end --no-browser-gpu --keep -o work/snap`
    and **Read every PNG**. Optionally zoom on faces, the card or edges with `--zoom x,y,w,h`.
-   Measure: `python3 -I scripts/motion-measure.py work/snap/at-0s.png work/snap/at-{2,4,6,8}s.png`
+   Measure with the prepare venv's Python (`bash scripts/motion-prepare.sh --setup` prints its path):
+   `"$py" -I scripts/motion-measure.py work/snap/at-0s.png work/snap/at-{2,4,6,8}s.png`
    (motion >= 0.25; the 8 s score must be ~0).
 6. **Critique** against `references/acceptance.md`: list P0/P1 defects as
    `time · object · observation -> exact change`. Fix P0s first. Stop when no P0/P1 remains or after 4
