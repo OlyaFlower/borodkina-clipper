@@ -19,7 +19,7 @@ py="$(bash "$root/scripts/motion-prepare.sh" --setup)"
 
 rows=()
 failed=0
-for fixture in stage poster landscape flat; do
+for fixture in stage poster landscape flat portrait; do
   mkdir -p "$work/$fixture/source"
   cp "$root/tests/fixtures/motion/$fixture.jpg" "$work/$fixture/source/cover"
   WORK_DIR="$work/$fixture" bash "$root/scripts/motion-prepare.sh" "$work/$fixture/source/cover" "$work/$fixture/prepare" 2> /dev/null

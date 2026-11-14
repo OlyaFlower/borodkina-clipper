@@ -1,7 +1,7 @@
 // Time helpers for 8-second seamless loops. Every function is pure in t (seconds): the frame at t is
 // the same however the renderer seeks, and t = 0 and t = DURATION give the same picture.
 
-export const KIT_VERSION = 'kit-2';
+export const KIT_VERSION = 'kit-2.1';
 export const DURATION = 8;
 export const FPS = 30;
 export const WIDTH = 1920;

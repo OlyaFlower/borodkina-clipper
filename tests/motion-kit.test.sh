@@ -8,7 +8,8 @@
 #   stage      16:10 concert scene: cropped, no faces (silhouettes are not faces)  -> concert-glow;
 #   poster     4:5 drawn portrait: blurred extension, the drawn face is detected     -> poster-float;
 #   landscape  2.2:1 hills at dusk: cropped, no faces, the sun is a light            -> sunlit-depth;
-#   flat       an almost uniform dark wash: no edges, no lights                      -> night-stage.
+#   flat       an almost uniform dark wash: no edges, no lights                      -> night-stage;
+#   portrait   a painted face in a dim room: cropped, the face is detected           -> intimate-portrait.
 # Copies the five gate snapshots (0, 2, 4, 6, 8 s) to $SNAPSHOT_DIR/<fixture>-<preset>/ when set.
 # Needs: ffmpeg, ffprobe, jq, node, Python 3.12 and motion/node_modules. Writes timings to $GITHUB_STEP_SUMMARY when set.
 set -euo pipefail
@@ -16,7 +17,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 fixture="${1:?usage: motion-kit.test.sh <fixture> [<preset>|auto]}"
 preset="${2:-auto}"
-[[ "$fixture" =~ ^(stage|poster|landscape|flat)$ ]] || { echo "unknown fixture $fixture"; exit 2; }
+[[ "$fixture" =~ ^(stage|poster|landscape|flat|portrait)$ ]] || { echo "unknown fixture $fixture"; exit 2; }
 [[ "$preset" == auto || -f "$root/motion/kit/presets/$preset.json" ]] || { echo "unknown preset $preset"; exit 2; }
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -47,6 +48,7 @@ case "$fixture" in
     [[ "$mode" == extend && "$faces" -ge 1 && -s "$run/prepare/background.jpg" ]] \
       || { echo "poster: expected extend with a face, got $mode, $faces"; exit 1; }
     ;;
+  portrait) [[ "$mode" == crop && "$faces" -ge 1 ]] || { echo "portrait: expected crop with a face, got $mode, $faces"; exit 1; } ;;
 esac
 if [[ "$mode" == crop ]]; then
   [[ -s "$run/prepare/plate.jpg" && -s "$run/prepare/plate-depth.png" ]] || { echo "crop mode needs the occlusion plate"; exit 1; }
@@ -62,13 +64,13 @@ size="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -
 # ---- the fallback author step: the chooser's preset (motion.yml does the same)
 chosen="$(node "$root/motion/kit/choose.mjs" "$meta")"
 if [[ "$preset" == auto ]]; then
-  declare -A expected=([stage]=concert-glow [poster]=poster-float [landscape]=sunlit-depth [flat]=night-stage)
+  declare -A expected=([stage]=concert-glow [poster]=poster-float [landscape]=sunlit-depth [flat]=night-stage [portrait]=intimate-portrait)
   [[ "$chosen" == "${expected[$fixture]}" ]] || { echo "$fixture: the chooser picked $chosen, expected ${expected[$fixture]}"; exit 1; }
   preset="$chosen"
 fi
 mkdir -p "$run/scene"
 cp "$root/motion/kit/presets/$preset.json" "$run/scene/scene.json"
-echo '{"authoring":"fallback","model":null,"kitVersion":"kit-2"}' > "$run/motion.json"
+echo '{"authoring":"fallback","model":null,"kitVersion":"kit-2.1"}' > "$run/motion.json"
 
 # ---- render, encode, verify, gates
 WORK_DIR="$run" bash "$root/scripts/motion-render.sh" "$run/scene" "$run/prepare"

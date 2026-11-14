@@ -1,6 +1,6 @@
 {
   "$schema": "../scene.schema.json",
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "poster-float",
   "about": "A poster shown whole: the card lifts off its blurred surround as a rigid plane, its shadow dropping away; a sheen glides over it once; bokeh drift behind it.",
   "seed": 20261117,

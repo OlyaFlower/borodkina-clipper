@@ -1,5 +1,5 @@
 {
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "decide-test-halo",
   "about": "Hand-written stand-in for a scene Claude wrote (tests/motion-decide.test.sh): the room orbits around the crowd, the lights swell on two beats and a custom warm halo answers them.",
   "seed": 20261114,

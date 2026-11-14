@@ -83,7 +83,7 @@ finish within 2 minutes (about 1-2 s of analysis on the runner, plus the first d
 | --- | --- |
 | `cover.jpg` | The 1920x1080 frame the video starts and ends on. |
 | `background.jpg` | Extend mode only: the same frame without the card. |
-| `depth.png` | 1920x1080 8-bit depth, 255 = nearest (Depth Anything V2 Small), edges snapped to the picture by a guided filter; flat inside every face. |
+| `depth.png` | 1920x1080 8-bit depth, 255 = nearest (Depth Anything V2 Small), edges snapped to the picture by a guided filter, then near things grown 2 px past their outline (so a thin near thing keeps its own crisp edge in the parallax); flat inside every face. |
 | `faces.json` | Face boxes in `cover.jpg` pixels, `[{"x","y","w","h","score"}]`, `[]` when none (YuNet). |
 | `palette.json` | Five dominant colours with their share, plus `light`, `dark` and `accent`. |
 | `focus.json` | Focal point `x`, `y` (0..1), its `depth` and `source`: `faces`, or else `saliency` weighted by nearness. |
@@ -107,7 +107,7 @@ which the workflows cache with `actions/cache`. An unusable cover fails with `so
 
 ### Kit
 
-Motion kit 2 (`kit-2`, reference: [`motion/kit/API.md`](motion/kit/API.md)) composes a video from a **scene spec**: a
+Motion kit 2.1 (`kit-2.1`, reference: [`motion/kit/API.md`](motion/kit/API.md)) composes a video from a **scene spec**: a
 JSON list of **blocks** with intensity presets (`subtle`, `medium`), parameters and rhythms (`primary` beats,
 `reactive` answers, `ambient`, `wave`), validated by `motion/kit/scene.schema.json` (generated from the blocks by
 `motion/kit/schema.mjs`) and by `motion/kit/validate.mjs`. `motion/kit/compose/index.html` renders any spec: one WebGL
@@ -116,7 +116,8 @@ pass assembled from the base and pixel blocks, plus a 2D overlay. The blocks (`m
 plate fills what near edges reveal instead of smearing them; on an extended cover a rigid card), `card-float` (the poster
 card floats as a rigid, bicubic-sampled plane with its shadow), `light-sweep`, `god-rays` (only where nothing nearer
 blocks the light), `stage-beams`, `bloom`, `grain` (anchored to the picture), `colour-breath`, `vignette`, `pencil`
-(the brand's graphite or chalk line drawing with tonal hatching over a warm paper wash), `light-pulse` (the beats) and
+(the brand's pencil drawing: the cover turns into broken contours and form-following hatching on warm paper and back),
+`light-pulse` (the beats, or a face's breathing key light) and
 `particles`. Six presets in `motion/kit/presets/` (`concert-glow`, `night-stage`, `intimate-portrait`, `poster-float`,
 `pencil-reveal`, `sunlit-depth`); `motion/kit/choose.mjs` picks one deterministically from `meta.json` (framing, faces,
 tone, lights) for the fallback.
@@ -184,7 +185,7 @@ The success callback carries one more field, read from `$WORK_DIR/motion.json` (
 
 ```json
 {"status":"succeeded","renditions":[{"file":"1280.av1.webm","bytes":123}],"poster":{"bytes":456},"durationMs":8000,
- "motion":{"authoring":"fallback","model":null,"kitVersion":"kit-2"}}
+ "motion":{"authoring":"fallback","model":null,"kitVersion":"kit-2.1"}}
 ```
 
 `authoring` is `fallback` (the preset `choose.mjs` picked: no Claude credential, no scene or a refused one) or
@@ -248,13 +249,15 @@ with all ffprobe assertions, and the publish and callback path against a local S
 The lint job also runs the motion kit's unit tests (`motion/kit/test/kit.test.mjs`: the schema is generated from the
 blocks, every preset is valid, every block is at rest at 0 and 8 s for both intensities, rhythms and camera paths are
 loop-safe, the validator refuses broken specs, the chooser) and validates every preset against the schema.
-The `motion-render` job runs `tests/motion-kit.test.sh <fixture> <preset>` on four generated covers in
+The `motion-render` job runs `tests/motion-kit.test.sh <fixture> <preset>` on five generated covers in
 `tests/fixtures/motion` (`make-fixtures.py` draws them; no third-party images): `stage` (16:10 concert, cropped, no faces;
 chooses `concert-glow`), `poster` (4:5 drawn portrait with title bars, extended, its drawn face detected; `poster-float`),
 `landscape` (2.2:1 hills at dusk, cropped, the sun a light; `sunlit-depth`) and `flat` (an almost uniform dark wash, the
-worst case for the motion gate; `night-stage`), each with the chooser's preset, plus every other preset on `stage`. With
+worst case for the motion gate; `night-stage`) and `portrait` (a painted, made-up face lit from the left in a dim room,
+cropped, the face detected; `intimate-portrait`), each with the chooser's preset, plus `night-stage` and `sunlit-depth`
+on `stage` and `pencil-reveal` on `landscape`. With
 the chooser it also runs the prepare unit tests (`tests/motion_prepare_test.py`: flat faces in depth, crop keeps faces,
-extension, letterbox pairs, palette, occlusion plate, edges, lights and tone, broken images) and checks that a non-image
+extension, letterbox pairs, palette, near edges grown, occlusion plate, edges, lights and tone, broken images) and checks that a non-image
 cover is `source_invalid`; then prepare, the render, encode, verify and the quality gates. The `motion-presets` job
 (`tests/motion-presets.test.sh`) snapshots every preset on every fixture at 0, 2, 4, 6 and 8 s without a full render and
 checks frame 0, the seam and motion. Timings and gate values go to the job summary; the snapshots are kept as the

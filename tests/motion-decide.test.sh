@@ -28,7 +28,7 @@ WORK_DIR="$run" bash "$root/scripts/motion-prepare.sh" "$run/source/cover" "$run
 prepared="$run/prepare"
 
 expect() { # authoring model reason
-  jq -e --arg a "$1" --argjson m "$2" --arg k kit-2 '. == {authoring: $a, model: $m, kitVersion: $k}' "$run/motion.json" > /dev/null \
+  jq -e --arg a "$1" --argjson m "$2" --arg k kit-2.1 '. == {authoring: $a, model: $m, kitVersion: $k}' "$run/motion.json" > /dev/null \
     || { echo "motion.json: $(cat "$run/motion.json"), expected $1 $2"; exit 1; }
   jq -e --arg a "$1" --arg r "$3" '. == {authoring: $a, reason: $r}' "$run/decision.json" > /dev/null \
     || { echo "decision.json: $(cat "$run/decision.json"), expected $1 $3"; exit 1; }

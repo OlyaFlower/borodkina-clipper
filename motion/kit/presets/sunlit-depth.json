@@ -1,6 +1,6 @@
 {
   "$schema": "../scene.schema.json",
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "sunlit-depth",
   "about": "A picture with a strong light (the sun, a lamp): the camera pushes gently into the depth while shafts of light fan out from the light and fade; the light glows.",
   "seed": 20261119,

@@ -93,6 +93,15 @@ def test_occlusion_plate_repaints_behind_thin_near_things():
     assert (plate[50, 50] == (200, 120, 160)).all() and abs(plate_depth[50, 50] - 0.1) < 1e-6, "far from the pole nothing changes"
 
 
+def test_near_edges_grow_past_the_outline():
+    d = np.full((60, 80), 0.1, np.float32)
+    d[20:40, 30:34] = 0.8  # a thin near stick
+    g = prepare.grow_near_edges(d)
+    assert g[30, 28] > 0.6 and g[30, 35] > 0.6, "the stick's depth reaches 2 px past its outline"
+    assert abs(g[30, 50] - 0.1) < 1e-6, "far from the stick nothing changes"
+    assert g[30, 31] > 0.79, "inside the stick the depth stays"
+
+
 def test_salient_edges_find_outlines_not_grain():
     rng = np.random.default_rng(3)
     flat = (90 + rng.normal(0, 3, (prepare.H, prepare.W, 1))).clip(0, 255).repeat(3, 2).astype(np.uint8)

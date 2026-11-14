@@ -1,8 +1,8 @@
 {
   "$schema": "../scene.schema.json",
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "pencil-reveal",
-  "about": "The brand signature: the cover is drawn over in pencil from its focal point outward, the picture washing towards warm paper while the drawing holds, then the lines lift off.",
+  "about": "The brand signature, for light and mid-key covers: from the focal point outward the cover becomes a pencil drawing on warm paper (broken contours, hatching that follows the forms, clean paper in the lights), holds and boils, then its colour floods back from the focal point and the lines lift.",
   "seed": 20261118,
   "blocks": [
     { "block": "parallax", "preset": "subtle", "params": { "camera": "drift", "amount": 10 } },

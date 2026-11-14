@@ -11,9 +11,9 @@
 #        - motion-assemble.sh, then `hyperframes lint` on the assembled project (errorCount 0);
 #        - motion-render.sh (render, master checks, encode, verify) and motion-gates.sh with authoring
 #          claude (frame 0 = cover, seamless loop, deterministic snapshots, and it must move).
-#      Then $WORK_DIR/motion.json is {"authoring":"claude","model":$CLAUDE_MODEL,"kitVersion":"kit-2"}.
+#      Then $WORK_DIR/motion.json is {"authoring":"claude","model":$CLAUDE_MODEL,"kitVersion":"kit-2.1"}.
 #   2. Otherwise the preset motion/kit/choose.mjs picks from meta.json is rendered and gated, and
-#      motion.json is {"authoring":"fallback","model":null,"kitVersion":"kit-2"}.
+#      motion.json is {"authoring":"fallback","model":null,"kitVersion":"kit-2.1"}.
 # Claude can never fail the job: anything wrong with its composition only leads to the fallback. Only a
 # failing fallback fails (exit 1, with the error code motion-render.sh or motion-gates.sh wrote).
 # The workflow log is public, so the details of a refused composition (validator messages, render and
@@ -31,7 +31,7 @@ if [[ $# -ne 2 ]]; then echo "usage: motion-decide.sh [--check] <author-dir> <pr
 author="$1"; prepared="$2"
 work="${WORK_DIR:?}"
 mkdir -p "$work"
-kit_version=kit-2
+kit_version=kit-2.1
 log="$work/decide.log"
 : > "$log"
 hf="$root/motion/node_modules/.bin/hyperframes"

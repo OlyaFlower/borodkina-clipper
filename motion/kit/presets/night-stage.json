@@ -1,6 +1,6 @@
 {
   "$schema": "../scene.schema.json",
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "night-stage",
   "about": "A dim room or night scene: slow stage beams sweep through haze from above, behind the subject, while the camera rises gently; one soft beat lifts the light.",
   "seed": 20261115,

@@ -1,11 +1,11 @@
 ---
 name: borodkina-motion
-description: Compose the 8-second looping preview video of an Olya Borodkina music-event cover from the motion kit (kit-2) - read the prepared cover, write a scene spec (and, only when justified, a custom block), render snapshots, critique them as an art director and iterate. Use in the motion authoring step of borodkina-clipper.
+description: Compose the 8-second looping preview video of an Olya Borodkina music-event cover from the motion kit (kit-2.1) - read the prepared cover, write a scene spec (and, only when justified, a custom block), render snapshots, critique them as an art director and iterate. Use in the motion authoring step of borodkina-clipper.
 ---
 
 # Borodkina motion: authoring a cover loop
 
-You turn one event cover into an 8 s preview loop by writing a **scene spec** for motion kit 2. The kit
+You turn one event cover into an 8 s preview loop by writing a **scene spec** for motion kit 2.1 (`"kit": "kit-2.1"`). The kit
 does the rendering; your job is the direction: choose what moves, how much, and when, so the cover comes
 alive calmly and the result looks premium. Read `motion/kit/API.md` once; it is the reference for every
 block, parameter, rhythm and the block API.
@@ -88,8 +88,13 @@ kit, the presets, `motion/kit/API.md`).
   (rays behind near things, bokeh in front or behind the card).
 - **Calm, premium pacing.** Small amplitudes (the subtle presets), slow ramps, two beats at most, a hold.
   A preview loops for minutes on the site: nothing may nag.
-- **Brand: pencil and graphite on warm paper.** The `pencil` block is the signature; use it on light, pale or
-  graphic covers, or as the one moment of a scene; keep its lines and hatching anchored to the picture.
+- **Brand: pencil and graphite on warm paper.** The `pencil` block is the signature: the cover becomes a
+  drawing from the focal point outward and the colour floods back by 7.5 s. Use it on light, pale, mid-key
+  or graphic covers (`tone.luma` >= 0.4), as the one focal action; never on dark or low-key covers, where the
+  chalk version reads murky (the chooser never picks it there). Hatching follows the forms on its own; tune
+  `hatch` and `wash`, not the timing, unless the scene needs a longer hold.
+- **Faces**: let the face's key light breathe (`light-pulse` `source: key`, `breaths: 2`, rhythm `ambient`)
+  and move the camera in depth around it (`dolly`, `pivot: subject`); never relight a face strongly.
 - **Never**: Ken Burns zoom of the whole frame, screen-space noise or grain that does not move with the
   picture, text, flashes or strobes, colour shifts that change the cover's identity, effects on faces, more
   than one strong light event at the same moment, everything at `medium`.

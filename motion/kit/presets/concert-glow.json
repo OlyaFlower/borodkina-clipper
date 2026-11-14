@@ -1,6 +1,6 @@
 {
   "$schema": "../scene.schema.json",
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "concert-glow",
   "about": "A dark stage with many lights: the lights swell and bloom on two beats while the room drifts in depth around the crowd; dust hangs in the air.",
   "seed": 20261114,

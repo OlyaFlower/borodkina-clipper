@@ -1,12 +1,13 @@
 {
   "$schema": "../scene.schema.json",
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "intimate-portrait",
-  "about": "A face: the camera drifts a few pixels around the face, which stays rigid; a warm light passes across once; the corners breathe.",
+  "about": "A face: the camera dollies slowly into the depth around the face, which stays rigid; the key light on the lit side of the face breathes twice; the corners breathe; dust hangs in the light.",
   "seed": 20261116,
   "blocks": [
-    { "block": "parallax", "preset": "subtle", "params": { "camera": "drift", "amount": 12, "pivot": "subject" } },
-    { "block": "light-sweep", "preset": "subtle", "params": { "colour": "warm", "angle": 38, "width": 0.22 } },
+    { "block": "parallax", "preset": "subtle", "params": { "camera": "dolly", "amount": 12, "push": 0.018, "pivot": "subject" } },
+    { "block": "light-pulse", "preset": "subtle", "params": { "source": "key", "radius": 0.2, "amount": 0.22, "colour": "warm", "breaths": 2 }, "timing": { "rhythm": "ambient" } },
+    { "block": "colour-breath", "preset": "subtle", "params": { "colour": "warm" } },
     { "block": "vignette", "preset": "subtle", "params": { "follow": 0.6 } },
     { "block": "grain", "preset": "subtle" },
     { "block": "particles", "preset": "subtle", "params": { "dust": 24, "bokeh": 0, "amount": 0.7 } }

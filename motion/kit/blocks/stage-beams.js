@@ -4,6 +4,28 @@
 
 import { phase } from '../lib/loop.js';
 
+/** [r, g, b] 0..1 -> [hue 0..1, saturation, value]. */
+function hsv([r, g, b]) {
+  const max = Math.max(r, g, b);
+  const d = max - Math.min(r, g, b);
+  let h = 0;
+  if (d > 1e-6) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+  }
+  return [(h / 6 + 1) % 1, max > 0 ? d / max : 0, max];
+}
+
+/** [hue 0..1, saturation, value] -> [r, g, b]. */
+function rgbOf(h, s, v) {
+  const f = (n) => {
+    const k = (n + ((h % 1) + 1) * 6) % 6;
+    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  return [f(5), f(3), f(1)];
+}
+
 export default {
   name: 'stage-beams',
   stage: 'pixel',
@@ -15,7 +37,8 @@ export default {
     count: { type: 'number', min: 2, max: 4, default: 3, about: 'number of beams' },
     sway: { type: 'number', min: 0, max: 0.35, default: 0.14, about: 'sway, radians' },
     spread: { type: 'number', min: 0.01, max: 0.12, default: 0.05, about: 'how fast a beam widens with distance' },
-    colour: { type: 'colour', default: 'accent', about: 'colour of the first beam; the others take light and c1' },
+    colour: { type: 'colour', default: 'accent', about: 'colour of the first beam; the others take light, c1 and accent' },
+    saturation: { type: 'number', min: 0, max: 1, default: 0.62, about: 'saturation floor of the lamps (their hue comes from the palette)' },
   },
   presets: {
     subtle: { amount: 0.22, sway: 0.1 },
@@ -69,13 +92,16 @@ vec3 $apply(vec3 c, Px p) {
         strength: 0.75 + 0.25 * kit.random(),
       };
     });
-    // Lamps: the palette's hues at full brightness; a dull palette falls back to warm white.
-    const sat = (c) => Math.max(...c) - Math.min(...c);
-    const lamp = (name) => {
-      const c = kit.colour(name);
-      return sat(c) < 0.12 ? kit.light('warm') : kit.light(name);
-    };
-    const cols = [lamp(params.colour), lamp('light'), lamp('c1'), lamp('accent')];
+    // Lamps: the palette's hues as coloured light, never beige. Each lamp keeps its palette hue at full
+    // brightness with a saturation floor, so a dull brown or grey palette still gives a real gel colour
+    // (a rose, an amber, a violet) rather than a warm haze. A palette with no hue at all (grey) takes
+    // the brand's warm amber; beams of one hue are fanned a little apart so they never look identical.
+    const hues = [params.colour, 'light', 'c1', 'accent'].map((name) => hsv(kit.colour(name)));
+    const cols = hues.map(([h, s], i) => {
+      const hue = s < 0.04 ? 0.09 : h;
+      const spread = s < 0.25 ? [0, 0.06, -0.06, 0.03][i] : 0;
+      return rgbOf(hue + spread, Math.max(s, params.saturation), 1).map((v) => 0.94 * v + 0.06);
+    });
     // Beams pass behind what is nearer than the subject. A featureless cover (almost no contrast) has
     // no meaningful depth (the model invents a ramp), so nothing occludes there.
     const featureless = (kit.scene.tone?.contrast ?? 1) < 0.05;

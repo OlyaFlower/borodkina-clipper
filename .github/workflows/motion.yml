@@ -138,7 +138,7 @@ jobs:
           display_report: 'false'
           classify_inline_comments: 'false'
           prompt: >-
-            /borodkina-motion Compose this job's cover loop with motion kit 2 (kit-2). The working directory is
+            /borodkina-motion Compose this job's cover loop with motion kit 2.1 (kit-2.1). The working directory is
             the clipper checkout. Inputs: prepare/ (meta.json, cover.jpg, depth.png, edges.png, glow.png and the
             other prepared files) and brief.json (the brief). Outputs: work/scene.json, optional
             work/blocks/<name>.js and work/REVIEW.md. Only the commands the skill names are allowed.

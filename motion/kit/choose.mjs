@@ -6,7 +6,10 @@
 //   3. dark, with several highlights (stage lights, a lit room)  -> concert-glow
 //   4. dark otherwise (a dim room, night, an almost empty frame) -> night-stage
 //   5. a strong light in the picture (the sun, a lamp), not light overall -> sunlit-depth
-//   6. anything else (light, pale, graphic covers)               -> pencil-reveal
+//   6. low-key otherwise (luma under 0.4)                        -> night-stage
+//   7. anything else (light, pale, graphic covers)               -> pencil-reveal
+// The pencil drawing needs paper-light values to read; on a dark or low-key cover it turns murky, so the
+// chooser never picks it there.
 
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
@@ -26,6 +29,7 @@ export function choose(meta) {
   if (dark) return { preset: 'night-stage', reason: `dark (luma ${luma}) without strong lights: beams bring the light` };
   if (lights.length && lights[0].luma > 0.8 && tone.key !== 'light')
     return { preset: 'sunlit-depth', reason: `a strong light at (${lights[0].x}, ${lights[0].y})` };
+  if (luma < 0.4) return { preset: 'night-stage', reason: `low-key (luma ${luma}): beams bring the light; too dark for pencil` };
   return { preset: 'pencil-reveal', reason: `${tone.key ?? 'mid'} cover: the brand's pencil drawing` };
 }
 

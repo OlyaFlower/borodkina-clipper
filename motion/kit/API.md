@@ -1,4 +1,4 @@
-# Motion kit 2 (`kit-2`)
+# Motion kit 2.1 (`kit-2.1`)
 
 An 8-second, 30 fps, 1920x1080, silent, seamlessly looping video made from an event cover. A **scene spec**
 (JSON) lists **blocks**; `compose/index.html` renders it with HyperFrames. Frame 0 is the cover, pixel for
@@ -23,7 +23,7 @@ motion/kit/
 
 ```json
 {
-  "kit": "kit-2",
+  "kit": "kit-2.1",
   "name": "concert-glow",
   "seed": 20261114,
   "beats": [2, 5.6],
@@ -53,17 +53,17 @@ motion/kit/
 
 | Block | Stage | Does | Default rhythm |
 | --- | --- | --- | --- |
-| `parallax` | base | Crop cover: 2.5D depth parallax, camera `orbit` / `drift` / `tilt` / `dolly`, a pivot depth that stays still (the subject; faces are flat in depth so they move rigidly). Occlusion marching keeps near things crisp; where the camera reveals what a near edge hid, the occlusion plate is shown. Extend cover: the card moves rigidly over the surround. | ambient |
+| `parallax` | base | Crop cover: 2.5D depth parallax, camera `orbit` / `drift` / `tilt` / `dolly`, a pivot depth that stays still (the subject; faces are flat in depth so they move rigidly). Occlusion marching keeps near things crisp (prepare grows near things 2 px past their outline in depth, so thin near things keep their own crisp edge instead of a toothed fringe); where the camera reveals what a near edge hid, the occlusion plate is shown. Extend cover: the card moves rigidly over the surround. | ambient |
 | `card-float` | base | Extend cover only: the poster card rises and sways as a rigid plane (only translated, bicubic-sampled: crisp in every frame), its shadow drops and softens, the surround counter-moves. | wave |
 | `light-sweep` | pixel | One soft band of light crosses once per loop; `target: card` makes it a sheen on the card only. | wave |
 | `god-rays` | pixel | Shafts from the cover's brightest light (or top / focal point), only where nothing nearer blocks the light. | wave |
-| `stage-beams` | pixel | 2–4 swaying volumetric beams from above in palette hues, haze fixed to the room, behind near things. | ambient |
+| `stage-beams` | pixel | 2–4 swaying volumetric beams from above, haze fixed to the room, behind near things. Lamps take the palette's hues with a saturation floor (`saturation`), so a dull palette still gives coloured light, never beige. | ambient |
 | `bloom` | pixel | The cover's own highlights glow (prepare: `glow.png`), anchored to the picture; a floor stays between beats. | reactive |
 | `grain` | pixel | Paper/film tooth anchored to the picture (never screen-space), mid-tones only; off the card by default. | ambient |
 | `colour-breath` | pixel | White balance leans towards a palette colour and back at equal luminance. | wave |
 | `vignette` | pixel | Corners darken gently, breathing twice per loop, centred towards the focal point. | ambient |
-| `pencil` | pixel | Brand signature: salient edges (prepare: `edges.png`) drawn in graphite (chalk on dark covers) outward from the focal point, tonal hatching, the picture washing towards warm paper; lines lift off before 7.6 s. Redraws at 12 phases per second. | ambient |
-| `light-pulse` | pixel | The beat: a warm exposure swell around the focal point or main light at each beat. | primary |
+| `pencil` | pixel | Brand signature: the cover becomes a pencil drawing on warm paper from the focal point outward and back. Broken, irregular contours (prepare: `edges.png`) first, then hatching in patches fixed to the picture that follow the local contour, only where there is form or shadow (value, the depth's turn from the light, contact shadows); highlights and far flat areas (sky) stay clean paper. Holds and boils at 12 phases per second (seeded stroke imperfections only); from `liftAt` the colour floods back from the focal point and the lines lift, all gone by 7.5 s. For light and mid-key covers: on dark ones (chalk) it reads murky, so the chooser never picks it there. | ambient |
+| `light-pulse` | pixel | The beat: a warm exposure swell around the focal point, the main light or (`source: key`) the key-lit side of the main face, at each beat; with `breaths: n` and rhythm `ambient`, n slow breaths per loop instead. | primary |
 | `particles` | overlay | Seeded dust motes and bokeh in palette hues, moving with the camera by depth, clear of faces and behind the card. | ambient |
 
 ## Block API (for a custom block in `work/blocks/<name>.js`, used as `custom/<name>`)

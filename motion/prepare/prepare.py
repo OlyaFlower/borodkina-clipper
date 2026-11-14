@@ -371,7 +371,19 @@ def refine_depth(d, frame, r=6, eps=2e-3):
     return np.clip(box(a, r) * g + box(b, r), 0, 1).astype(np.float32)
 
 
-# ---------- occlusion plate, edges, glow, lights and tone (for the kit-2 blocks)
+def grow_near_edges(d, r=2, sigma=0.8):
+    """Grows every near thing r px past its outline (a max filter), softened by sigma px.
+
+    The snapped depth outline still wanders a pixel or two around the picture's outline. Where it falls
+    inside a near thing, a sliver of the near thing's colour is left behind on the far layer when the
+    parallax moves the layers apart: a thin near thing (a raised stick) gets toothed leading edges and a
+    dark fringe. Grown past the outline, the near layer carries its whole crisp edge plus a thin halo
+    of what is right behind it, which moves over the same colour and does not show."""
+    grown = slide(slide(d, r, np.maximum, 0), r, np.maximum, 1)
+    return np.clip(gaussian(grown, sigma), 0, 1).astype(np.float32)
+
+
+# ---------- occlusion plate, edges, glow, lights and tone (for the kit blocks)
 
 
 def slide(arr, r, op, axis):
@@ -629,7 +641,7 @@ def main(argv):
     lap("frameMs")
 
     depth = estimate_depth(ort.InferenceSession(depth_model, opts, providers=providers), frame, framing, faces)
-    full = refine_depth(depth, frame)
+    full = grow_near_edges(refine_depth(depth, frame))
     Image.fromarray(np.clip(full * 255 + 0.5, 0, 255).astype(np.uint8)).save(os.path.join(out, "depth.png"))
     lap("depthMs")
 

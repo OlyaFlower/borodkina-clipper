@@ -87,9 +87,10 @@ jobs:
 
   # The fallback motion pipeline on the generated covers (tests/fixtures/motion), directly on the runner
   # (headless Chrome, software WebGL, no Docker): prepare, the chosen or named preset, render, encode,
-  # verify and the quality gates. Each fixture with the chooser's preset (auto), and every other preset on
-  # stage (poster-float needs an extended cover: poster auto). Timings go to the job summary; the five gate
-  # snapshots (0, 2, 4, 6, 8 s) of each render are kept as an artifact for review.
+  # verify and the quality gates. Each fixture with the chooser's preset (auto: concert-glow, poster-float,
+  # sunlit-depth, night-stage, intimate-portrait), and the other presets where they belong (night-stage on
+  # the stage, pencil-reveal on the landscape, sunlit-depth on the stage). Timings go to the job summary;
+  # the five gate snapshots (0, 2, 4, 6, 8 s) of each render are kept as an artifact for review.
   motion-render:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -101,9 +102,9 @@ jobs:
           - { fixture: poster, preset: auto }
           - { fixture: landscape, preset: auto }
           - { fixture: flat, preset: auto }
+          - { fixture: portrait, preset: auto }
           - { fixture: stage, preset: night-stage }
-          - { fixture: stage, preset: intimate-portrait }
-          - { fixture: stage, preset: pencil-reveal }
+          - { fixture: landscape, preset: pencil-reveal }
           - { fixture: stage, preset: sunlit-depth }
     env:
       TOOLS_DIR: ${{ github.workspace }}/.tools/bin

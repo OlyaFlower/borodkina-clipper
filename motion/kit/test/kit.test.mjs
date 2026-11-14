@@ -90,7 +90,7 @@ test('crop presets also run on an extended cover (the parallax base becomes a ri
 });
 
 test('the validator refuses broken specs', async () => {
-  const ok = { kit: 'kit-2', name: 'x', blocks: [{ block: 'parallax' }, { block: 'grain' }] };
+  const ok = { kit: 'kit-2.1', name: 'x', blocks: [{ block: 'parallax' }, { block: 'grain' }] };
   assert.deepEqual(await validate(ok, meta()), []);
   const bad = async (spec, m = meta()) => assert.notDeepEqual(await validate(spec, m), [], JSON.stringify(spec));
   await bad({ ...ok, kit: 'kit-1' });
@@ -115,6 +115,9 @@ test('the chooser is deterministic and covers the fixtures', () => {
   assert.equal(choose(meta({ lights: [], tone: { luma: 0.15, key: 'dark', highlights: 0 } })).preset, 'night-stage');
   assert.equal(choose(meta({ lights: [{ x: 0.6, y: 0.5, luma: 0.98 }], tone: { luma: 0.35, key: 'mid' } })).preset, 'sunlit-depth');
   assert.equal(choose(meta({ lights: [], tone: { luma: 0.7, key: 'light' } })).preset, 'pencil-reveal');
+  // never pencil on a low-key cover
+  assert.equal(choose(meta({ lights: [], tone: { luma: 0.36, key: 'mid' } })).preset, 'night-stage');
+  assert.equal(choose(meta({ lights: [{ x: 0.5, y: 0.5, luma: 0.6 }], tone: { luma: 0.38, key: 'mid' } })).preset, 'night-stage');
   assert.deepEqual(choose(meta()), choose(meta()));
 });
 
@@ -154,7 +157,7 @@ test('every block is identity at t = 0 and t = 8 for both intensities', () => {
       if (block.modes && !block.modes.includes(m.framing.mode)) continue;
       for (const preset of ['subtle', 'medium']) {
         const [{ params, timing }] = checkSpec(
-          { kit: 'kit-2', blocks: block.stage === 'base' ? [{ block: name, preset }] : [{ block: 'parallax' }, { block: name, preset }] },
+          { kit: 'kit-2.1', blocks: block.stage === 'base' ? [{ block: name, preset }] : [{ block: 'parallax' }, { block: name, preset }] },
           blocks,
           m,
         ).slice(block.stage === 'base' ? 0 : 1);
