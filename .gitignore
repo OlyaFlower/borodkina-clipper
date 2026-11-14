@@ -3,3 +3,8 @@ node_modules/
 .hyperframes/
 renders/
 __pycache__/
+# The motion author step (motion.yml): what motion-author-setup.sh puts in the checkout for Claude.
+/work/
+/prepare/
+/brief.json
+/.claude/

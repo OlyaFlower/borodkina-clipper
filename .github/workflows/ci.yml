@@ -171,3 +171,39 @@ jobs:
           path: ${{ runner.temp }}/preset-snapshots
           if-no-files-found: ignore
           retention-days: 14
+
+  # scripts/motion-decide.sh, the choice after motion.yml's Claude author step, on the prepared stage
+  # fixture. Claude is never called: its output is simulated. fallback: no work/scene.json; claude: a
+  # hand-written scene with a custom block is rendered and gated as Claude's (and motion-author-setup.sh);
+  # invalid: broken scenes and unsafe blocks are refused and the fallback is rendered.
+  motion-decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [fallback, claude, invalid]
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.tools/bin
+      DECIDE_CASE: ${{ matrix.case }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/borodkina-motion
+          key: motion-prepare-${{ runner.os }}-${{ hashFiles('motion/prepare/requirements.txt', 'motion/prepare/models.env') }}
+      - name: Install pinned ffmpeg, Bun and HyperFrames
+        run: |
+          bash scripts/install-tools.sh ffmpeg bun
+          "$TOOLS_DIR/bun" --version
+          npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+      - name: Decide between Claude's composition and the fallback
+        run: bash tests/motion-decide.test.sh "$DECIDE_CASE"

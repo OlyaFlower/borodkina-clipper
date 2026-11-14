@@ -59,16 +59,20 @@ It uses the same GitHub Environments, secrets, R2 layout, renditions and callbac
 Before dispatching, the admin uploads two objects to R2:
 
 - `sources/<id>`: the cover, JPEG, PNG or WebP (recognised by its first bytes), at most 20 MiB, at least 64x64.
-- `sources/<id>.json`: the brief, a JSON object of at most 64 KiB. Its fields are defined by the authoring step
-  (a later package); today the job only checks that it exists and is an object.
+- `sources/<id>.json`: the brief, a JSON object of at most 64 KiB. The job reads one field itself: `model`
+  (optional), the Claude model of the author step, `claude-sonnet-5-5` (the default) or `claude-opus-5-5`; any
+  other value means the default. Claude reads the rest (for example the mood or tempo) from disk.
 
 Steps: validate, install the pinned ffmpeg, `motion/` (`npm ci`, HyperFrames and GSAP pinned exactly in
 `motion/package-lock.json`) and Python 3.12, fetch the cover and brief (`scripts/fetch-cover.sh`), prepare the cover
-(`scripts/motion-prepare.sh`), author the scene (for now always the preset `motion/kit/choose.mjs` picks, recorded as
-fallback authoring), render with `scripts/motion-render.sh` (1920x1080, 30 fps, 240 frames, `--quality delivery`, 3
-workers), encode and verify
-with the same `encode.sh`/`verify.sh` as `clip` (start 0, duration 8), check the quality gates (`scripts/motion-gates.sh`),
-publish to `videos/<mediaId>/` and call back. The job times out after 35 minutes.
+(`scripts/motion-prepare.sh`), let Claude author the scene (see [Authoring](#authoring); skipped without a Claude
+credential), then `scripts/motion-decide.sh`: Claude's scene if it passes every check and gate, else the preset
+`motion/kit/choose.mjs` picks, rendered with `scripts/motion-render.sh` (1920x1080, 30 fps, 240 frames,
+`--quality delivery`, 3 workers), encoded and verified with the same `encode.sh`/`verify.sh` as `clip` (start 0,
+duration 8) and checked by the quality gates (`scripts/motion-gates.sh`); publish to `videos/<mediaId>/` and call
+back. The job times out after 40 minutes (the admin expires a motion job after 40 minutes without a callback):
+about 3 for setup and prepare, at most 15 for the author step, at most 11 for Claude's render and gates (else about
+5 for the fallback's), about 2 for encoding and publishing.
 
 ### Prepare
 
@@ -131,6 +135,38 @@ teaches the contract, the work loop (assemble, `hyperframes check`, snapshots at
 iterations), the brand's motion direction and the outputs (`work/scene.json`, optional `work/blocks/*.js`,
 `work/REVIEW.md`).
 
+### Authoring
+
+Only when the environment has a Claude credential (`CLAUDE_CODE_OAUTH_TOKEN`, or else `ANTHROPIC_API_KEY`); CI and
+forks have none, so their jobs go straight to the fallback.
+
+1. `scripts/motion-author-setup.sh` puts in the checkout `prepare/` (a copy of the prepared cover), `brief.json`, an
+   empty `work/`, and `.claude/skills/` with `borodkina-motion` and the official `hyperframes` and `hyperframes-cli`
+   skills from the pinned `hyperframes` package (it ships no GSAP skill; nothing is downloaded), and sets
+   `CLAUDE_MODEL` from the brief's allow-listed `model`. The step also installs the pinned Bun
+   (`scripts/versions.env`; the action's own `oven-sh/setup-bun` is not on this repository's allow-list) and the
+   HyperFrames browser.
+2. `anthropics/claude-code-action` (v1.0.276, pinned by commit) runs `/borodkina-motion` in automation mode. The
+   prompt holds only paths. Limits: 15 minutes, 40 turns, `--permission-mode dontAsk` (every tool not allowed is
+   denied) with only `Read(./**)`, `Edit`/`Write` in `work/`, `Skill`, and the exact commands of the skill:
+   `node motion/kit/{choose,validate,check-blocks}.mjs`, `bash scripts/motion-assemble.sh work prepare work/project`,
+   `npx --prefix motion hyperframes {lint,check,snapshot} work/project ...` and `bash scripts/motion-measure.sh`.
+   No web tools, no subagents, no git or shell beyond that. Only this step gets the Claude credential, never R2 or
+   callback secrets; `GITHUB_TOKEN` stays `contents: read` and is passed as `github_token`, so the action needs no
+   OIDC `id-token` and no GitHub App, and in automation mode it starts none of its GitHub comment or CI tools.
+   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` keeps credentials out of the commands Claude runs. `show_full_output`
+   and `display_report` are off, so the transcript never reaches the public log or job summary.
+   `continue-on-error`: the step never fails the job.
+3. `scripts/motion-decide.sh work <prepare>` decides deterministically. Claude's `work/scene.json` (with
+   `work/blocks/*.js`) is used only if it validates against the schema and kit (`validate.mjs`), every custom block
+   passes `motion/kit/check-blocks.mjs` (static: kit imports only; no time, randomness, network, page globals or
+   code generation) and `hyperframes lint`, and its render passes every quality gate (motion included); then
+   `authoring` is `claude` with the model. Anything else, or any change Claude made to the checkout outside
+   `work/`, renders the fallback preset (`authoring` `fallback`). Only a failing fallback fails the job
+   (`render_failed`). The refused composition's details stay in `$WORK_DIR/decide.log`; the log and job summary
+   show only a fixed reason: `no-scene`, `model-not-allowed`, `files`, `scene-invalid`, `blocks-refused`,
+   `assemble-failed`, `lint-failed`, `render-failed`, `gates-failed` (or `passed`).
+
 ### Quality gates
 
 `scripts/motion-gates.sh` fails the job with `render_failed` unless the master and every rendition last 8 s within one
@@ -151,8 +187,9 @@ The success callback carries one more field, read from `$WORK_DIR/motion.json` (
  "motion":{"authoring":"fallback","model":null,"kitVersion":"kit-2"}}
 ```
 
-`authoring` is `fallback` (a fixed composition) or `claude` (written by Claude, `model` then names the model);
-`kitVersion` names the composition kit. Error codes: `source_invalid` (cover or brief missing, unreadable or too large),
+`authoring` is `fallback` (the preset `choose.mjs` picked: no Claude credential, no scene or a refused one) or
+`claude` (Claude's scene passed every check and gate; `model` then names the model, `claude-sonnet-5-5` or
+`claude-opus-5-5`); `kitVersion` names the composition kit. Error codes: `source_invalid` (cover or brief missing, unreadable or too large),
 `render_failed` (the prepare step's setup or analysis, HyperFrames setup, the render itself, the master's 1920x1080 /
 30 fps / 240-frame check, a composition whose WebGL context cannot be created, or a failed quality gate),
 `encode_failed` (renditions or publishing).
@@ -164,6 +201,8 @@ Create two GitHub Environments in the repo settings, `dev` and `prod`, each with
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`: an R2 API token with object read and write on that bucket.
   The endpoint is `https://<account>.eu.r2.cloudflarestorage.com` (EU jurisdiction), region `auto`.
 - `CLIPPER_CALLBACK_SECRET`: the same value the admin uses to verify callbacks for that environment.
+- Optional, for the motion author step: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or
+  `ANTHROPIC_API_KEY`. Without either, motion jobs render the fallback preset.
 
 The admin dispatches with a fine-grained token that has only `Actions: read and write` on this repository.
 
@@ -197,6 +236,9 @@ exhausts it, so the VM freezes on `[download] Destination: …` and the `contain
 - The only inputs are IDs and numbers. Each is validated by `scripts/validate-inputs.sh` before use, and inputs reach scripts only through `env:`, never through `${{ }}` inside `run:`.
 - `callback.mjs` refuses any URL outside the allowed admin prefix for the environment, so the signing secret cannot be sent elsewhere.
 - Tools (yt-dlp, ffmpeg) are pinned by version and sha256 in `scripts/versions.env`, the motion prepare packages and models by sha256 in `motion/prepare/`; third-party actions are pinned by commit SHA.
+- The motion author step is the only one with the Claude credential; Claude may only write in `work/` and run
+  the kit's own commands, its transcript is never printed, and its output is used only after deterministic checks
+  (see [Authoring](#authoring)). Bun for the action is pinned by sha256 like the other tools.
 - Only clip videos you have the rights to.
 
 ## Tests
@@ -217,4 +259,9 @@ cover is `source_invalid`; then prepare, the render, encode, verify and the qual
 (`tests/motion-presets.test.sh`) snapshots every preset on every fixture at 0, 2, 4, 6 and 8 s without a full render and
 checks frame 0, the seam and motion. Timings and gate values go to the job summary; the snapshots are kept as the
 `motion-snapshots-<fixture>-<preset>` and `motion-preset-snapshots` artifacts for 14 days (fixtures only, never real covers).
+The `motion-decide` job (`tests/motion-decide.test.sh <case>`) tests the choice after the author step without
+calling Claude: `fallback` (no `work/scene.json`), `claude` (a hand-written scene with a custom block,
+`tests/fixtures/motion/claude-scene`, rendered and gated as Claude's; also `motion-author-setup.sh`) and `invalid`
+(broken specs, unsafe blocks, symlinks and stray files refused with their reason, and a full run that renders the
+fallback without printing the refused composition). The kit unit tests also cover `check-blocks.mjs`.
 The `clip` and `motion` workflows are never triggered by CI.

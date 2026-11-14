@@ -9,6 +9,7 @@ import { checkSpec, colour, lightColour } from '../lib/spec.js';
 import { buildSchema, kitBlocks } from '../schema.mjs';
 import { validate } from '../validate.mjs';
 import { PRESETS, choose } from '../choose.mjs';
+import { checkBlockSource } from '../check-blocks.mjs';
 
 const kitDir = new URL('../', import.meta.url);
 const blocks = await kitBlocks();
@@ -201,6 +202,41 @@ test('seeded randomness repeats', () => {
   const a = mulberry32(42);
   const b = mulberry32(42);
   for (let i = 0; i < 5; i++) assert.equal(a(), b());
+});
+
+test('the custom block check passes kit-style blocks and refuses unsafe ones', () => {
+  // Every kit pixel and overlay block, importing the kit the way a custom block does, passes.
+  for (const f of readdirSync(new URL('blocks/', kitDir)).filter((f) => f.endsWith('.js'))) {
+    const src = readFileSync(new URL(`blocks/${f}`, kitDir), 'utf8').replaceAll("'../lib/", "'../kit/lib/");
+    if (/stage: 'base'/.test(src)) continue;
+    assert.deepEqual(checkBlockSource(f, src), [], f);
+  }
+  const halo = readFileSync(new URL('../../tests/fixtures/motion/claude-scene/blocks/halo.js', kitDir), 'utf8');
+  assert.deepEqual(checkBlockSource('halo.js', halo), []);
+  const refused = (src, name = 'bad.js') => assert.notDeepEqual(checkBlockSource(name, src), [], src);
+  const body = (code) => `export default { stage: 'pixel', setup(kit, params) { ${code} } };`;
+  assert.deepEqual(checkBlockSource('ok.js', body('const a = [1]; return { uniforms: (t, env) => ({ a: a[0] * env }) };')), []);
+  refused(halo, 'Halo.js');
+  refused(body(''), 'bad.mjs');
+  refused(body('return { uniforms: (t, env) => ({ a: Math.random() * env }) };'));
+  refused(body('const now = Date.now();'));
+  refused(body('const n = performance.now();'));
+  refused(body("fetch('x');"));
+  refused(body("new Image().src = 'x';"));
+  refused(body('const g = globalThis;'));
+  refused(body("const f = (() => 0)['constructor'];"));
+  refused(body("const f = kit[`x${'y'}`];"));
+  refused(body("const u = 'https://example.com/';"));
+  refused(body("const m = await import('../kit/lib/loop.js');"));
+  refused(body('setTimeout(() => 0, 1);'));
+  refused(body('const s = String.fromCharCode(102);'));
+  refused(`import { phase } from 'https://example.com/loop.js';\n${body('')}`);
+  refused(`import * as loop from '../kit/lib/loop.js';\n${body('')}`);
+  refused(`import {\n  phase,\n} from '../kit/lib/loop.js';\n${body('')}`);
+  refused("export default { stage: 'base', setup() {} };");
+  refused("export default { stage: 'pixel' };");
+  refused(body('').replace('export default', 'const block ='));
+  refused(body('const x = 1; // café'));
 });
 
 let failed = 0;

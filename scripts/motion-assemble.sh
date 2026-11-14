@@ -8,7 +8,9 @@
 # blocks in blocks/, the pinned GSAP in assets/vendor/, the prepared files in assets/, assets/scene.js
 # (window.__MOTION_SCENE = meta.json) and assets/spec.js (window.__MOTION_SPEC = scene.json).
 # The spec is checked first with motion/kit/validate.mjs (schema and kit rules). Custom blocks: at most 8
-# files of at most 64 KiB, named [a-z][a-z0-9-]*.js. Exits 1 with the reason on stderr when anything is wrong.
+# files of at most 64 KiB, named [a-z][a-z0-9-]*.js, that pass motion/kit/check-blocks.mjs (so even the
+# authoring step's own snapshots never load a block that reaches for time, randomness or the network).
+# Exits 1 with the reason on stderr when anything is wrong.
 # Needs node, jq and motion/node_modules.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -42,6 +44,9 @@ for f in ${customs[@]+"${customs[@]}"}; do
   [[ -f "$f" && ! -L "$f" && "$name" =~ ^[a-z][a-z0-9-]*\.js$ ]] || die "custom block $name must be a file named [a-z][a-z0-9-]*.js"
   (( $(size_of "$f") <= 65536 )) || die "custom block $name is larger than 64 KiB"
 done
+if (( ${#customs[@]} > 0 )); then
+  node "$kit/check-blocks.mjs" "$scene_dir/blocks" >&2 || die "a custom block does not pass motion/kit/check-blocks.mjs"
+fi
 # Every custom/<name> in the spec needs blocks/<name>.js.
 while IFS= read -r name; do
   [[ -f "$scene_dir/blocks/$name.js" ]] || die "the spec uses custom/$name but blocks/$name.js is missing"
