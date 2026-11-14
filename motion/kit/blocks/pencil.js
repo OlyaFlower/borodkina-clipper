@@ -97,16 +97,15 @@ float $patch(vec2 q, vec2 jq, float dens, float salt, out vec2 w) {
   vec2 cell = floor(jq / $CELL) + salt * 101.0;
   vec2 centre = (floor(jq / $CELL) + 0.5) * $CELL - salt * $CELL;
   vec2 cuv = centre / uRes;
-  vec2 o = vec2(18.0) / uRes;
-  float l1 = luma(texture2D(tCover, cuv - o).rgb);
-  float l2 = luma(texture2D(tCover, cuv + vec2(o.x, -o.y)).rgb);
-  float l3 = luma(texture2D(tCover, cuv + vec2(-o.x, o.y)).rgb);
-  float l4 = luma(texture2D(tCover, cuv + o).rgb);
-  float d1 = texture2D(tDepth, cuv - o).r;
-  float d2 = texture2D(tDepth, cuv + vec2(o.x, -o.y)).r;
-  float d3 = texture2D(tDepth, cuv + vec2(-o.x, o.y)).r;
-  float d4 = texture2D(tDepth, cuv + o).r;
-  vec2 grad = vec2(l2 + l4 - l1 - l3, l3 + l4 - l1 - l2) + 1.5 * vec2(d2 + d4 - d1 - d3, d3 + d4 - d1 - d2);
+  // the local contour from three taps of luminance and depth around the patch centre
+  vec2 o = vec2(24.0) / uRes;
+  float l0 = luma(texture2D(tCover, cuv).rgb);
+  float lx = luma(texture2D(tCover, cuv + vec2(o.x, 0.0)).rgb);
+  float ly = luma(texture2D(tCover, cuv + vec2(0.0, o.y)).rgb);
+  float d0 = texture2D(tDepth, cuv).r;
+  float dx = texture2D(tDepth, cuv + vec2(o.x, 0.0)).r;
+  float dy = texture2D(tDepth, cuv + vec2(0.0, o.y)).r;
+  vec2 grad = 2.0 * (vec2(lx - l0, ly - l0) + 1.5 * vec2(dx - d0, dy - d0));
   float base = 0.8 + 0.3 * (hash12(cell + 0.37 + $seed) - 0.5);
   float fieldAng = atan(grad.y, grad.x) + 0.5 * PI + 0.25 * (hash12(cell + 7.1) - 0.5);
   float follow = 0.8 * smoothstep(0.03, 0.12, length(grad));
@@ -124,9 +123,12 @@ float $patch(vec2 q, vec2 jq, float dens, float salt, out vec2 w) {
 }
 
 vec3 $apply(vec3 c, Px p) {
+  // Nothing to draw before the drawing starts and after the colour is back: the cover as it is.
+  if ($fade <= 0.0 && $wash <= 0.0) return c;
   vec2 q = p.src * uRes;
-  float tooth = 0.62 + 0.38 * vnoise(q * 0.9 + 11.0 + $seed);
   float ord = $order(q);
+  if (ord > $draw + 0.02 || ord + 0.32 < $back) return c;
+  float tooth = 0.62 + 0.38 * vnoise(q * 0.9 + 11.0 + $seed);
 
   // ---- tone: value (graphite darkens shadows; chalk lights the lights) plus the form's turn from the light
   float value = mix(1.0 - p.luma, p.luma, $chalk);
@@ -153,12 +155,15 @@ vec3 $apply(vec3 c, Px p) {
   // lights, one direction in the half-tones, crossed in the shadows, a third pass in the deepest)
   float dens = smoothstep(0.32, 0.95, v) * mix(0.6, 1.15, $hatch);
   vec2 jq = q + 16.0 * (vec2(vnoise(q * 0.018 + $seed), vnoise(q * 0.018 + 31.0 + $seed)) - 0.5);
-  vec2 wa;
-  vec2 wb;
-  float ha = $patch(q, jq, dens, 0.0, wa);
-  float hb = $patch(q, jq + 0.5 * $CELL, dens, 0.5, wb);
-  float sw = wa.x + wb.x + 1e-4;
-  float hatching = max(ha * smoothstep(0.0, 0.6, wa.x / sw), hb * smoothstep(0.0, 0.6, wb.x / sw));
+  float hatching = 0.0;
+  if (dens > 0.001) {
+    vec2 wa;
+    vec2 wb;
+    float ha = $patch(q, jq, dens, 0.0, wa);
+    float hb = $patch(q, jq + 0.5 * $CELL, dens, 0.5, wb);
+    float sw = wa.x + wb.x + 1e-4;
+    hatching = max(ha * smoothstep(0.0, 0.6, wa.x / sw), hb * smoothstep(0.0, 0.6, wb.x / sw));
+  }
 
   // ---- contours: broken, irregular pressure, an occasional lighter second pass beside the first
   vec2 bc = floor(q / 18.0);
