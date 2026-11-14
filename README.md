@@ -163,15 +163,22 @@ forks have none, so their jobs go straight to the fallback.
    passes `motion/kit/check-blocks.mjs` (static: kit imports only; no time, randomness, network, page globals or
    code generation) and `hyperframes lint`, and its render passes every quality gate (motion included); then
    `authoring` is `claude` with the model. Anything else, or any change Claude made to the checkout outside
-   `work/`, renders the fallback preset (`authoring` `fallback`). Only a failing fallback fails the job
+   `work/`, renders the fallback preset (`authoring` `fallback`). If that preset fails its render or gates, the
+   safe scene [`motion/kit/safe.json`](motion/kit/safe.json) is rendered instead (still `authoring` `fallback`): the
+   picture stands still (no camera, no geometry change, frame 0 is the cover) while a soft light and the corners
+   breathe, and a frame 0 a little under the gate (down to 0.95) only warns. Only a failing safe scene fails the job
    (`render_failed`). The refused composition's details stay in `$WORK_DIR/decide.log`; the log and job summary
    show only a fixed reason: `no-scene`, `model-not-allowed`, `files`, `scene-invalid`, `blocks-refused`,
-   `assemble-failed`, `lint-failed`, `render-failed`, `gates-failed` (or `passed`).
+   `assemble-failed`, `lint-failed`, `render-failed`, `gates-failed` (or `passed`), and which scene shipped
+   (`claude`, the preset's name or `safe-breath`; also in `$WORK_DIR/decision.json`).
 
 ### Quality gates
 
 `scripts/motion-gates.sh` fails the job with `render_failed` unless the master and every rendition last 8 s within one
-frame, frame 0 matches the prepared cover (SSIM >= 0.98), the last frame matches frame 0 (SSIM >= 0.98), and five frames
+frame, frame 0 matches the prepared cover (SSIM >= 0.98, measured twice: the lossless HyperFrames snapshot at 0 s in
+full colour, and frame 0 of the master in luma; HyperFrames captures 4:2:0 JPEG frames and encodes yuv420p, so on a
+saturated poster with small coloured lettering the master's colour SSIM falls under 0.98 even when frame 0 was drawn
+exactly, which is reported as `ssimFrame0CoverColour` but not gated), the last frame matches frame 0 (SSIM >= 0.98), and five frames
 (0, 2, 4, 6, 8 s) snapshotted twice with HyperFrames on software WebGL are pixel-identical (at least SSIM >= 0.999).
 It also checks that the composition moves: `scripts/motion-measure.py` scores the luminance change of the 2, 4 and 6 s
 snapshots against frame 0 relative to the cover's own gradient (roughly pixels of apparent motion, so a flat cover is
@@ -249,22 +256,25 @@ with all ffprobe assertions, and the publish and callback path against a local S
 The lint job also runs the motion kit's unit tests (`motion/kit/test/kit.test.mjs`: the schema is generated from the
 blocks, every preset is valid, every block is at rest at 0 and 8 s for both intensities, rhythms and camera paths are
 loop-safe, the validator refuses broken specs, the chooser) and validates every preset against the schema.
-The `motion-render` job runs `tests/motion-kit.test.sh <fixture> <preset>` on five generated covers in
+The `motion-render` job runs `tests/motion-kit.test.sh <fixture> <preset>` on six generated covers in
 `tests/fixtures/motion` (`make-fixtures.py` draws them; no third-party images): `stage` (16:10 concert, cropped, no faces;
 chooses `concert-glow`), `poster` (4:5 drawn portrait with title bars, extended, its drawn face detected; `poster-float`),
 `landscape` (2.2:1 hills at dusk, cropped, the sun a light; `sunlit-depth`) and `flat` (an almost uniform dark wash, the
 worst case for the motion gate; `night-stage`) and `portrait` (a painted, made-up face lit from the left in a dim room,
-cropped, the face detected; `intimate-portrait`), each with the chooser's preset, plus `night-stage` and `sunlit-depth`
+cropped, the face detected; `intimate-portrait`) and `vivid` (a 1122x1402 RGBA PNG graphic poster: saturated colour
+fields covered in small coloured lettering, extended, no faces; `poster-float`; the frame-0 regression: its master's
+colour SSIM must stay under 0.98 while the frame-0 gate passes), each with the chooser's preset, plus `night-stage` and `sunlit-depth`
 on `stage` and `pencil-reveal` on `landscape`. With
 the chooser it also runs the prepare unit tests (`tests/motion_prepare_test.py`: flat faces in depth, crop keeps faces,
 extension, letterbox pairs, palette, near edges grown, occlusion plate, edges, lights and tone, broken images) and checks that a non-image
 cover is `source_invalid`; then prepare, the render, encode, verify and the quality gates. The `motion-presets` job
-(`tests/motion-presets.test.sh`) snapshots every preset on every fixture at 0, 2, 4, 6 and 8 s without a full render and
+(`tests/motion-presets.test.sh`) snapshots every preset and the safe scene on every fixture at 0, 2, 4, 6 and 8 s without a full render and
 checks frame 0, the seam and motion. Timings and gate values go to the job summary; the snapshots are kept as the
 `motion-snapshots-<fixture>-<preset>` and `motion-preset-snapshots` artifacts for 14 days (fixtures only, never real covers).
 The `motion-decide` job (`tests/motion-decide.test.sh <case>`) tests the choice after the author step without
 calling Claude: `fallback` (no `work/scene.json`), `claude` (a hand-written scene with a custom block,
 `tests/fixtures/motion/claude-scene`, rendered and gated as Claude's; also `motion-author-setup.sh`) and `invalid`
 (broken specs, unsafe blocks, symlinks and stray files refused with their reason, and a full run that renders the
-fallback without printing the refused composition). The kit unit tests also cover `check-blocks.mjs`.
+fallback without printing the refused composition) and `safe` (the chosen preset is broken, so the safe scene is
+rendered and gated and the job still gets its video). The kit unit tests also cover `check-blocks.mjs`.
 The `clip` and `motion` workflows are never triggered by CI.

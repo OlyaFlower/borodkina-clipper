@@ -89,6 +89,26 @@ test('crop presets also run on an extended cover (the parallax base becomes a ri
   }
 });
 
+test('the safe scene (motion-decide.sh last resort) is valid everywhere and never moves the picture', async () => {
+  const spec = JSON.parse(readFileSync(new URL('safe.json', kitDir), 'utf8'));
+  assert.deepEqual(await validate(spec, meta()), [], 'crop');
+  assert.deepEqual(await validate(spec, extendMeta()), [], 'extend');
+  assert.equal(spec.blocks[0].block, 'parallax');
+  assert.equal(spec.blocks[0].params.amount, 0, 'a still camera: no geometry change');
+  const allowed = new Set(['parallax', 'light-pulse', 'vignette', 'colour-breath']);
+  for (const b of spec.blocks) assert.ok(allowed.has(b.block), `${b.block} is not a light or vignette block`);
+  // The base is the identity at every t, on crop and extend covers.
+  const params = { ...Object.fromEntries(Object.entries(blocks.parallax.params).map(([k, p]) => [k, p.default])), ...spec.blocks[0].params };
+  for (const m of [meta(), extendMeta()]) {
+    const timing = { rhythm: 'ambient' };
+    const inst = blocks.parallax.setup(fakeKit(m, timing, []), params);
+    for (const t of [0, 1, 2.5, 4, 6.5, 8]) {
+      const u = inst.uniforms(t, envelope(t, timing, []));
+      for (const k of ['shift', 'push', 'cardOff', 'bgOff', 'lift']) if (k in u) assert.ok(isZero(u[k]), `parallax ${k} at ${t} s`);
+    }
+  }
+});
+
 test('the validator refuses broken specs', async () => {
   const ok = { kit: 'kit-2.1', name: 'x', blocks: [{ block: 'parallax' }, { block: 'grain' }] };
   assert.deepEqual(await validate(ok, meta()), []);

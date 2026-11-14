@@ -14,14 +14,20 @@
 #      Then $WORK_DIR/motion.json is {"authoring":"claude","model":$CLAUDE_MODEL,"kitVersion":"kit-2.1"}.
 #   2. Otherwise the preset motion/kit/choose.mjs picks from meta.json is rendered and gated, and
 #      motion.json is {"authoring":"fallback","model":null,"kitVersion":"kit-2.1"}.
-# Claude can never fail the job: anything wrong with its composition only leads to the fallback. Only a
-# failing fallback fails (exit 1, with the error code motion-render.sh or motion-gates.sh wrote).
+#   3. If that preset fails its render or gates, the safe scene motion/kit/safe.json (a still picture: no
+#      camera, no geometry change, only a soft light and the corners breathing) is rendered and gated with
+#      MOTION_GATES_SAFE=1 (a frame 0 a little under the cover only warns), motion.json as in 2.
+# Claude can never fail the job: anything wrong with its composition only leads to the fallback, and a
+# failing preset only leads to the safe scene. Only a failing safe scene fails (exit 1, with the error code
+# motion-render.sh or motion-gates.sh wrote).
 # The workflow log is public, so the details of a refused composition (validator messages, render and
 # gate logs) go to $WORK_DIR/decide.log, never to stdout; only the fixed reason is printed:
 # no-scene, model-not-allowed, files, scene-invalid, blocks-refused, assemble-failed, lint-failed, render-failed or
-# gates-failed. Writes $WORK_DIR/decision.json {"authoring","reason"} and a line to the job summary.
+# gates-failed. Writes $WORK_DIR/decision.json {"authoring","reason","scene"} (scene: claude, the preset's
+# name or safe-breath) and a line to the job summary.
 # Env: WORK_DIR; CLAUDE_MODEL (allow-listed; default claude-sonnet-5-5); optional MOTION_CLAUDE_RENDER_LIMIT
-# and MOTION_CLAUDE_GATES_LIMIT (seconds, default 420 and 240) bound the attempt with Claude's composition.
+# and MOTION_CLAUDE_GATES_LIMIT (seconds, default 420 and 240) bound the attempt with Claude's composition;
+# MOTION_PRESETS_DIR (default motion/kit/presets; tests point it at a broken preset).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
@@ -35,6 +41,7 @@ kit_version=kit-2.1
 log="$work/decide.log"
 : > "$log"
 hf="$root/motion/node_modules/.bin/hyperframes"
+presets="${MOTION_PRESETS_DIR:-$root/motion/kit/presets}"
 export HYPERFRAMES_NO_UPDATE_CHECK=1 HYPERFRAMES_NO_TELEMETRY=1
 
 models=(claude-sonnet-5-5 claude-opus-5-5)
@@ -81,11 +88,11 @@ clean_render() {
   rm -rf "$work/out" "$work/master.mp4" "$work/composition" "$work/gates" "$work/gates.json" \
     "$work/error-code" "$work/error-message"
 }
-decided() { # authoring reason
-  jq -nc --arg a "$1" --arg r "$2" '{authoring: $a, reason: $r}' > "$work/decision.json"
-  echo "motion authoring: $1 ($2)"
+decided() { # authoring reason scene
+  jq -nc --arg a "$1" --arg r "$2" --arg s "$3" '{authoring: $a, reason: $r, scene: $s}' > "$work/decision.json"
+  echo "motion authoring: $1 ($2), scene $3"
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-    echo "Motion authoring: **$1** ($2)" >> "$GITHUB_STEP_SUMMARY"
+    echo "Motion authoring: **$1** ($2), scene $3" >> "$GITHUB_STEP_SUMMARY"
     echo >> "$GITHUB_STEP_SUMMARY"
   fi
 }
@@ -105,8 +112,8 @@ if (( ok == 0 )); then
   clean_render
   if limit "${MOTION_CLAUDE_RENDER_LIMIT:-420}" bash "$here/motion-render.sh" "$staged" "$prepared" >> "$log" 2>&1; then
     if limit "${MOTION_CLAUDE_GATES_LIMIT:-240}" bash "$here/motion-gates.sh" >> "$log" 2>&1; then
-      jq -c '{ssimFrame0Cover, ssimFirstLast, snapshotsIdentical, motion, motionGate}' "$work/gates.json" || true
-      decided claude passed
+      jq -c '{ssimFrame0Cover, ssimSnapshot0Cover, ssimFirstLast, snapshotsIdentical, motion, motionGate}' "$work/gates.json" || true
+      decided claude passed claude
       exit 0
     fi
     reason=gates-failed
@@ -118,11 +125,29 @@ fi
 
 # ---- 2. the fallback: the chooser's preset, logs shown as usual
 clean_render
-preset="$(node "$root/motion/kit/choose.mjs" "$prepared/meta.json")"
+preset="$(node "$root/motion/kit/choose.mjs" "$prepared/meta.json" || echo none)"
 rm -rf "$work/scene-fallback"
 mkdir -p "$work/scene-fallback"
-cp "$root/motion/kit/presets/$preset.json" "$work/scene-fallback/scene.json"
+cp "$presets/$preset.json" "$work/scene-fallback/scene.json" 2>/dev/null || echo '{}' > "$work/scene-fallback/scene.json"
 motion_json fallback null
-bash "$here/motion-render.sh" "$work/scene-fallback" "$prepared"
-bash "$here/motion-gates.sh"
-decided fallback "$reason"
+if bash "$here/motion-render.sh" "$work/scene-fallback" "$prepared"; then
+  if bash "$here/motion-gates.sh"; then
+    decided fallback "$reason" "$preset"
+    exit 0
+  fi
+  preset_reason=gates-failed
+else
+  preset_reason=render-failed
+fi
+echo "fallback preset refused: $preset_reason; rendering the safe scene"
+
+# ---- 3. the safe scene: a still picture whose light and corners breathe; a frame 0 that misses the
+# cover by a small margin only warns (MOTION_GATES_SAFE=1). Only this one failing fails the job.
+clean_render
+rm -rf "$work/scene-safe"
+mkdir -p "$work/scene-safe"
+cp "$root/motion/kit/safe.json" "$work/scene-safe/scene.json"
+motion_json fallback null
+bash "$here/motion-render.sh" "$work/scene-safe" "$prepared"
+MOTION_GATES_SAFE=1 bash "$here/motion-gates.sh"
+decided fallback "$reason" safe-breath

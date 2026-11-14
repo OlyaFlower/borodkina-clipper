@@ -33,7 +33,7 @@ jobs:
         run: |
           npm ci --prefix motion --ignore-scripts --no-audit --no-fund
           node motion/kit/test/kit.test.mjs
-          for f in motion/kit/presets/*.json; do node motion/kit/validate.mjs "$f"; done
+          for f in motion/kit/presets/*.json motion/kit/safe.json; do node motion/kit/validate.mjs "$f"; done
 
   encode-and-publish:
     runs-on: ubuntu-latest
@@ -88,7 +88,8 @@ jobs:
   # The fallback motion pipeline on the generated covers (tests/fixtures/motion), directly on the runner
   # (headless Chrome, software WebGL, no Docker): prepare, the chosen or named preset, render, encode,
   # verify and the quality gates. Each fixture with the chooser's preset (auto: concert-glow, poster-float,
-  # sunlit-depth, night-stage, intimate-portrait), and the other presets where they belong (night-stage on
+  # sunlit-depth, night-stage, intimate-portrait, and poster-float on vivid, the saturated PNG poster of the
+  # frame-0 regression), and the other presets where they belong (night-stage on
   # the stage, pencil-reveal on the landscape, sunlit-depth on the stage). Timings go to the job summary;
   # the five gate snapshots (0, 2, 4, 6, 8 s) of each render are kept as an artifact for review.
   motion-render:
@@ -103,6 +104,7 @@ jobs:
           - { fixture: landscape, preset: auto }
           - { fixture: flat, preset: auto }
           - { fixture: portrait, preset: auto }
+          - { fixture: vivid, preset: auto }
           - { fixture: stage, preset: night-stage }
           - { fixture: landscape, preset: pencil-reveal }
           - { fixture: stage, preset: sunlit-depth }
@@ -176,14 +178,15 @@ jobs:
   # scripts/motion-decide.sh, the choice after motion.yml's Claude author step, on the prepared stage
   # fixture. Claude is never called: its output is simulated. fallback: no work/scene.json; claude: a
   # hand-written scene with a custom block is rendered and gated as Claude's (and motion-author-setup.sh);
-  # invalid: broken scenes and unsafe blocks are refused and the fallback is rendered.
+  # invalid: broken scenes and unsafe blocks are refused and the fallback is rendered; safe: the chosen
+  # preset fails and the safe scene (motion/kit/safe.json) still gives the job its video.
   motion-decide:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        case: [fallback, claude, invalid]
+        case: [fallback, claude, invalid, safe]
     env:
       TOOLS_DIR: ${{ github.workspace }}/.tools/bin
       DECIDE_CASE: ${{ matrix.case }}
