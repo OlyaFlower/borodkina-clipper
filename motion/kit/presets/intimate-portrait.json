@@ -1,0 +1,14 @@
+{
+  "$schema": "../scene.schema.json",
+  "kit": "kit-2",
+  "name": "intimate-portrait",
+  "about": "A face: the camera drifts a few pixels around the face, which stays rigid; a warm light passes across once; the corners breathe.",
+  "seed": 20261116,
+  "blocks": [
+    { "block": "parallax", "preset": "subtle", "params": { "camera": "drift", "amount": 12, "pivot": "subject" } },
+    { "block": "light-sweep", "preset": "subtle", "params": { "colour": "warm", "angle": 38, "width": 0.22 } },
+    { "block": "vignette", "preset": "subtle", "params": { "follow": 0.6 } },
+    { "block": "grain", "preset": "subtle" },
+    { "block": "particles", "preset": "subtle", "params": { "dust": 24, "bokeh": 0, "amount": 0.7 } }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "../scene.schema.json",
+  "kit": "kit-2",
+  "name": "poster-float",
+  "about": "A poster shown whole: the card lifts off its blurred surround as a rigid plane, its shadow dropping away; a sheen glides over it once; bokeh drift behind it.",
+  "seed": 20261117,
+  "blocks": [
+    { "block": "card-float", "preset": "subtle", "params": { "rise": 12, "sway": 8 } },
+    { "block": "light-sweep", "preset": "subtle", "params": { "target": "card", "colour": "white", "width": 0.08, "amount": 0.3 } },
+    { "block": "vignette", "preset": "subtle" },
+    { "block": "grain", "preset": "subtle" },
+    { "block": "particles", "preset": "subtle", "params": { "dust": 40, "bokeh": 8 } }
+  ]
+}

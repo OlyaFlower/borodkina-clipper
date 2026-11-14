@@ -80,6 +80,41 @@ def test_palette_is_deterministic():
     assert abs(sum(c["share"] for c in a["colors"]) - 1) < 0.01
 
 
+def test_occlusion_plate_repaints_behind_thin_near_things():
+    pic = np.zeros((prepare.H, prepare.W, 3), np.float32)
+    pic[...] = (200, 120, 160)  # a pink stage behind
+    pic[200:900, 940:964] = (10, 10, 12)  # a thin dark pole in front
+    depth = np.full((prepare.H, prepare.W), 0.1, np.float32)
+    depth[200:900, 940:964] = 0.9
+    plate, plate_depth, share = prepare.occlusion_plate(Image.fromarray(pic.astype(np.uint8)), depth)
+    assert 0 < share < 0.2
+    assert np.abs(plate[550, 945:960].astype(np.float32) - (200, 120, 160)).max() < 12, plate[550, 945:960]
+    assert plate_depth[550, 950] < 0.2, plate_depth[550, 950]
+    assert (plate[50, 50] == (200, 120, 160)).all() and abs(plate_depth[50, 50] - 0.1) < 1e-6, "far from the pole nothing changes"
+
+
+def test_salient_edges_find_outlines_not_grain():
+    rng = np.random.default_rng(3)
+    flat = (90 + rng.normal(0, 3, (prepare.H, prepare.W, 1))).clip(0, 255).repeat(3, 2).astype(np.uint8)
+    depth = np.full((prepare.H, prepare.W), 0.3, np.float32)
+    assert prepare.salient_edges(Image.fromarray(flat), depth).max() < 0.2, "grain is not a line"
+    boxed = flat.copy()
+    boxed[300:700, 600:1300] = 220
+    e = prepare.salient_edges(Image.fromarray(boxed), depth)
+    assert e[300:700, 597:604].max() > 0.5 and e[480:520, 900:1000].max() < 0.1
+
+
+def test_light_sources_and_tone():
+    pic = np.full((prepare.H, prepare.W, 3), 20, np.float32)
+    ys, xs = np.mgrid[0 : prepare.H, 0 : prepare.W]
+    spot = np.exp(-(((xs - 1400) / 60.0) ** 2 + ((ys - 300) / 60.0) ** 2))
+    pic = (pic + spot[..., None] * 235).clip(0, 255).astype(np.uint8)
+    lights = prepare.light_sources(Image.fromarray(pic))
+    assert lights and abs(lights[0]["x"] - 1400 / 1920) < 0.03 and abs(lights[0]["y"] - 300 / 1080) < 0.04, lights
+    assert prepare.tone(Image.fromarray(pic))["key"] == "dark"
+    assert prepare.tone(Image.new("RGB", (1920, 1080), (230, 225, 220)))["key"] == "light"
+
+
 def test_non_image_is_source_invalid():
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as fh:
         fh.write(b"\xff\xd8\xff not really a jpeg")

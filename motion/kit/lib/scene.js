@@ -1,8 +1,9 @@
 // Wiring between a kit composition and HyperFrames: the prepared scene, image loading behind a
 // build-ready promise, and the clock (a paused GSAP timeline plus hf-seek) that draws every layer at t.
 //
-// scripts/motion-render.sh puts the prepared files into the composition's assets/ (cover.jpg,
-// depth.png, meta.json) and writes assets/scene.js, which sets window.__MOTION_SCENE to meta.json.
+// scripts/motion-assemble.sh puts the prepared files into the composition's assets/ (cover.jpg,
+// depth.png, meta.json, ...) and writes assets/scene.js, which sets window.__MOTION_SCENE to meta.json,
+// and assets/spec.js, which sets window.__MOTION_SPEC to the scene spec.
 
 import { DURATION } from './loop.js';
 

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Motion kit 2 · scene composition · 8 seconds</title>
+    <!--
+      Renders a scene spec (assets/spec.js sets window.__MOTION_SPEC) over a prepared cover
+      (assets/scene.js sets window.__MOTION_SCENE to meta.json). scripts/motion-assemble.sh copies this
+      page with motion/kit/lib into kit/lib/, motion/kit/blocks into kit/blocks/, custom blocks into
+      blocks/, the pinned GSAP into assets/vendor/ and the prepared files into assets/. See motion/kit/API.md.
+    -->
+    <script src="assets/vendor/gsap.min.js"></script>
+    <script src="assets/scene.js"></script>
+    <script src="assets/spec.js"></script>
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: #000;
+      }
+      #kit-compose {
+        position: relative;
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+      }
+      #kit-image,
+      #kit-overlay {
+        position: absolute;
+        inset: 0;
+        width: 1920px;
+        height: 1080px;
+      }
+      #kit-image {
+        z-index: 1;
+      }
+      #kit-overlay {
+        z-index: 2;
+        mix-blend-mode: screen;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="kit-compose"
+      data-composition-id="kit-compose"
+      data-start="0"
+      data-width="1920"
+      data-height="1080"
+      data-duration="8"
+      data-fps="30"
+    >
+      <canvas
+        id="kit-image"
+        class="clip"
+        data-start="0"
+        data-duration="8"
+        data-track-index="0"
+        data-track-kind="graphics"
+        width="1920"
+        height="1080"
+      ></canvas>
+      <canvas
+        id="kit-overlay"
+        class="clip"
+        data-start="0"
+        data-duration="8"
+        data-track-index="1"
+        data-track-kind="graphics"
+        width="1920"
+        height="1080"
+      ></canvas>
+    </div>
+    <script type="module">
+      import { compose } from './kit/lib/compose.js';
+
+      // compose() registers the paused timeline as window.__timelines['kit-compose'] once the scene is built.
+      window.__timelines = window.__timelines || {};
+      compose('kit-compose');
+    </script>
+  </body>
+</html>

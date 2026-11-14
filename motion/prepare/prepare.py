@@ -9,7 +9,12 @@ Writes into <out-dir>:
   faces.json    [{"x","y","w","h","score"}] face boxes in cover.jpg pixels, [] when none
   palette.json  {"colors":[{"hex","share"}] x5, "light","dark","accent"}
   focus.json    {"x","y" (0..1 of the frame), "depth" (0..1), "source": "faces"|"saliency"}
-  meta.json     everything above in one object for the authoring step, plus framing and timings
+  plate.jpg, plate-depth.png  crop mode only: the cover and its depth with what near edges hide repainted
+                from farther surroundings, shown where the parallax reveals it
+  edges.png     1920x1080 8-bit thin salient edges (luminance and depth), for the pencil block
+  glow.png      480x270 blurred highlights, for the bloom block
+  meta.json     everything above in one object for the authoring step, plus framing, light sources,
+                tone (brightness, contrast, saturation, warmth) and timings
 
 Framing: a cover whose aspect is close to 16:9 (cropping it would lose at most 25 % of its area,
 i.e. from 4:3 to 2.37:1) is cropped, with the crop window centred on the faces or, without faces,
@@ -40,7 +45,7 @@ FACE_IN = 640
 FACE_SCORE = 0.75
 FACE_NMS = 0.3
 MIN_FACE = 0.03  # faces narrower than 3 % of the cover width are ignored (crowds, posters)
-KIT_PREPARE_VERSION = "prepare-1"
+KIT_PREPARE_VERSION = "prepare-2"
 
 
 class SourceInvalid(Exception):
@@ -293,6 +298,9 @@ def frame_cover(img, faces):
         "aim": "centre",
         "sourceBox": [0, 0, img.width, img.height],
         "coverBox": [ix, iy, ix + iw, iy + ih],
+        # The shadow baked into background.jpg: the card's box moved down by dy, blurred by sigma pixels,
+        # darkening the surround by up to strength. The card block moves it with the card.
+        "shadow": {"dy": 12, "sigma": 36, "strength": 0.6},
     }
     return frame, framing, mapped, background
 
@@ -361,6 +369,186 @@ def refine_depth(d, frame, r=6, eps=2e-3):
     a = (box(g * p, r) - mean_g * mean_p) / (box(g * g, r) - mean_g * mean_g + eps)
     b = mean_p - a * mean_g
     return np.clip(box(a, r) * g + box(b, r), 0, 1).astype(np.float32)
+
+
+# ---------- occlusion plate, edges, glow, lights and tone (for the kit-2 blocks)
+
+
+def slide(arr, r, op, axis):
+    """Sliding min or max over 2r+1 samples along one axis, edges clamped."""
+    pad = [(r, r) if a == axis else (0, 0) for a in range(arr.ndim)]
+    p = np.pad(arr, pad, mode="edge")
+    n = arr.shape[axis]
+    out = np.take(p, np.arange(n), axis=axis)
+    for i in range(1, 2 * r + 1):
+        out = op(out, np.take(p, np.arange(i, i + n), axis=axis))
+    return out
+
+
+def resize_plane(a, size, resample=Image.BILINEAR):
+    return np.asarray(Image.fromarray(a.astype(np.float32)).resize(size, resample), dtype=np.float32)
+
+
+def push_pull(values, weight):
+    """Fills low-weight pixels from their weighted surroundings (push-pull pyramid).
+    values HxWxC float, weight HxW in 0..1."""
+    h, w = weight.shape
+    if h <= 2 or w <= 2:
+        total = float(weight.sum())
+        mean = (values * weight[..., None]).sum((0, 1)) / max(total, 1e-9)
+        return np.broadcast_to(mean, values.shape).astype(np.float32)
+    ph, pw = h + h % 2, w + w % 2
+    v = np.pad(values * weight[..., None], ((0, ph - h), (0, pw - w), (0, 0)), mode="edge")
+    k = np.pad(weight, ((0, ph - h), (0, pw - w)), mode="edge")
+    vs = v.reshape(ph // 2, 2, pw // 2, 2, -1).sum((1, 3))
+    ks = k.reshape(ph // 2, 2, pw // 2, 2).sum((1, 3))
+    coarse = push_pull(vs / np.maximum(ks, 1e-9)[..., None], np.minimum(ks, 1.0))
+    up = np.stack([resize_plane(coarse[..., c], (pw, ph)) for c in range(coarse.shape[2])], axis=2)[:h, :w]
+    a = np.clip(weight, 0, 1)[..., None]
+    return (values * a + up * (1 - a)).astype(np.float32)
+
+
+def occlusion_plate(frame, depth, reach=32, step=0.06):
+    """What lies behind near edges, for the parallax to show where the camera reveals it.
+
+    A pixel may be revealed if, within `reach` pixels (more than the largest camera offset of the kit),
+    something is farther than it by more than `step`: it is then near and next to a step down in depth.
+    The plate repaints those pixels from farther surroundings (push-pull, weighted towards far pixels),
+    colour and depth, at half resolution; everything else is the cover itself.
+    Returns (plate RGB uint8 HxW, plate depth float HxW 0..1, share of repainted pixels)."""
+    hw, hh = W // 2, H // 2
+    d = resize_plane(depth, (hw, hh))
+    rgb = np.asarray(frame.resize((hw, hh), Image.BILINEAR), dtype=np.float32)
+    r = max(1, reach // 2)
+    far = slide(slide(d, r, np.minimum, 0), r, np.minimum, 1)
+    hidden = np.clip((d - far - step) / step, 0, 1)
+    # Grow the mask past the soft rim of every near edge, so no trace of the near thing stays in the plate.
+    hidden = slide(slide(hidden, 4, np.maximum, 0), 4, np.maximum, 1)
+    keep = (hidden < 0.02).astype(np.float32) * (1.05 - d) ** 2
+    filled = push_pull(np.concatenate([rgb, d[..., None]], axis=2), np.clip(keep * 4, 0, 1))
+    hidden = np.clip(gaussian(hidden, 1.0), 0, 1)
+    m = np.clip(resize_plane(hidden, (W, H)), 0, 1)
+    full = np.asarray(frame, dtype=np.float32)
+    fill_rgb = np.stack([resize_plane(filled[..., c], (W, H)) for c in range(3)], axis=2)
+    plate = full * (1 - m[..., None]) + fill_rgb * m[..., None]
+    plate_depth = depth * (1 - m) + np.minimum(resize_plane(filled[..., 3], (W, H)), depth) * m
+    return np.clip(plate + 0.5, 0, 255).astype(np.uint8), np.clip(plate_depth, 0, 1), float(hidden.mean())
+
+
+def sobel(a):
+    p = np.pad(a, 1, mode="edge")
+    gx = (p[:-2, 2:] + 2 * p[1:-1, 2:] + p[2:, 2:]) - (p[:-2, :-2] + 2 * p[1:-1, :-2] + p[2:, :-2])
+    gy = (p[2:, :-2] + 2 * p[2:, 1:-1] + p[2:, 2:]) - (p[:-2, :-2] + 2 * p[:-2, 1:-1] + p[:-2, 2:])
+    return gx, gy
+
+
+def salient_edges(frame, depth, card_box=None):
+    """Thin edge strength 0..1: luminance edges and depth silhouettes, thinned to one line along the
+    gradient, weighted towards salient and near areas. The pencil block draws these lines."""
+    g = gaussian(luminance(np.asarray(frame, dtype=np.float32) / 255.0), 2.0)
+    lx, ly = sobel(g)
+    zx, zy = sobel(gaussian(depth, 1.0))
+    gx, gy = lx + 0.6 * zx, ly + 0.6 * zy
+    mag = np.hypot(gx, gy)
+    # Non-maximum suppression in four directions keeps one line per edge.
+    ang = (np.round(np.arctan2(gy, gx) / (np.pi / 4)) % 4).astype(np.int8)
+    p = np.pad(mag, 1, mode="edge")
+    pairs = {
+        0: (p[1:-1, :-2], p[1:-1, 2:]),
+        1: (p[:-2, :-2], p[2:, 2:]),
+        2: (p[:-2, 1:-1], p[2:, 1:-1]),
+        3: (p[:-2, 2:], p[2:, :-2]),
+    }
+    thin = np.zeros_like(mag)
+    for k, (a, b) in pairs.items():
+        sel = (ang == k) & (mag >= a) & (mag >= b)
+        thin[sel] = mag[sel]
+    # Lines start well above grain and JPEG noise (near the median gradient) and above an absolute floor
+    # (a step of about 10 grey levels), so a flat cover has no lines at all.
+    ref = max(float(np.percentile(mag, 99.5)), 0.3)
+    floor = max(0.06, 6 * float(np.median(mag)))
+    if floor >= ref:
+        return np.zeros_like(mag, dtype=np.float32)
+    e = np.clip((thin - floor) / (ref - floor), 0, 1) ** 0.7
+    sal = resize_plane(saliency(frame), (W, H))
+    e *= 0.45 + 0.35 * np.sqrt(np.clip(sal, 0, 1)) + 0.2 * depth
+    if card_box is not None:  # extend mode: only the card is drawn, never the blurred surround
+        x0, y0, x1, y1 = card_box
+        mask = np.zeros_like(e)
+        mask[y0 + 3 : y1 - 3, x0 + 3 : x1 - 3] = 1
+        e *= mask
+    e = gaussian(e, 0.7)
+    strong = e[e > 0.02]
+    scale = float(np.percentile(strong, 98)) if strong.size else 1.0
+    return np.clip(e / max(scale, 0.25), 0, 1).astype(np.float32)
+
+
+def glow_map(frame, card_box=None):
+    """The cover's highlights, blurred, at a quarter of the size (480x270): the bloom block adds it back."""
+    small = np.asarray(frame.resize((W // 4, H // 4), Image.BILINEAR), dtype=np.float32) / 255.0
+    lum = luminance(small)
+    lo = max(0.55, float(np.percentile(lum, 85)))
+    k = np.clip((lum - lo) / max(1.0 - lo, 1e-3), 0, 1) ** 1.5
+    if card_box is not None:
+        x0, y0, x1, y1 = (v // 4 for v in card_box)
+        mask = np.zeros_like(k)
+        mask[y0:y1, x0:x1] = 1
+        k *= mask
+    bright = small * k[..., None]
+    out = np.stack([0.6 * gaussian(bright[..., c], 3.0) + 0.4 * gaussian(bright[..., c], 10.0) for c in range(3)], 2)
+    return np.clip(out * 255 * 1.6 + 0.5, 0, 255).astype(np.uint8)
+
+
+def light_sources(frame, n=4):
+    """Bright spots (lamps, the sun, stage lights), brightest first:
+    [{"x","y" (0..1 of the frame), "r" (0..1 of the width), "luma" (0..1), "hex"}]."""
+    sw, sh = 96, 54
+    small = np.asarray(frame.resize((sw, sh), Image.BILINEAR), dtype=np.float32)
+    lum = gaussian(luminance(small) / 255.0, 1.5)
+    p = np.pad(lum, 2, mode="edge")
+    peak = np.ones_like(lum, dtype=bool)
+    for dy in range(5):
+        for dx in range(5):
+            if (dy, dx) != (2, 2):
+                peak &= lum >= p[dy : dy + sh, dx : dx + sw]
+    thr = max(0.45, float(np.percentile(lum, 97)))
+    ys, xs = np.nonzero(peak & (lum >= thr))
+    order = np.argsort(-lum[ys, xs], kind="stable")
+    found = []
+    for i in order:
+        y, x = int(ys[i]), int(xs[i])
+        if any(abs(fx - x) < 8 and abs(fy - y) < 8 for fx, fy, _ in found):
+            continue
+        half = lum >= lum[y, x] * 0.75
+        r = 1
+        while r < 12 and r <= y < sh - r and r <= x < sw - r and half[y - r : y + r + 1, x - r : x + r + 1].mean() > 0.5:
+            r += 1
+        found.append((x, y, {
+            "x": round((x + 0.5) / sw, 4),
+            "y": round((y + 0.5) / sh, 4),
+            "r": round(r / sw, 4),
+            "luma": round(float(lum[y, x]), 3),
+            "hex": hexcolor(small[y, x]),
+        }))
+        if len(found) == n:
+            break
+    return [f for _, _, f in found]
+
+
+def tone(frame, card_box=None):
+    """Brightness, contrast, saturation and warmth of the picture (of the card in extend mode)."""
+    img = frame.crop(tuple(card_box)) if card_box is not None else frame
+    a = np.asarray(img.resize((192, 108), Image.BILINEAR), dtype=np.float32) / 255.0
+    lum = luminance(a)
+    mean = float(lum.mean())
+    return {
+        "luma": round(mean, 3),
+        "contrast": round(float(lum.std()), 3),
+        "saturation": round(float((a.max(2) - a.min(2)).mean()), 3),
+        "warmth": round(float((a[..., 0] - a[..., 2]).mean()), 3),
+        "highlights": round(float((lum > 0.75).mean()), 3),
+        "key": "dark" if mean < 0.3 else ("light" if mean > 0.6 else "mid"),
+    }
 
 
 # ---------- palette (k-means, deterministic initialisation)
@@ -445,6 +633,23 @@ def main(argv):
     Image.fromarray(np.clip(full * 255 + 0.5, 0, 255).astype(np.uint8)).save(os.path.join(out, "depth.png"))
     lap("depthMs")
 
+    card = framing["coverBox"] if framing["mode"] == "extend" else None
+    plate_share = 0.0
+    if card is None:
+        plate, plate_depth, plate_share = occlusion_plate(frame, full)
+        Image.fromarray(plate).save(os.path.join(out, "plate.jpg"), quality=95, subsampling=0, optimize=True)
+        Image.fromarray(np.clip(plate_depth * 255 + 0.5, 0, 255).astype(np.uint8)).save(
+            os.path.join(out, "plate-depth.png")
+        )
+        files["plate"] = "plate.jpg"
+        files["plateDepth"] = "plate-depth.png"
+    edges = salient_edges(frame, full, card)
+    Image.fromarray(np.clip(edges * 255 + 0.5, 0, 255).astype(np.uint8)).save(os.path.join(out, "edges.png"))
+    Image.fromarray(glow_map(frame, card)).save(os.path.join(out, "glow.png"))
+    files["edges"] = "edges.png"
+    files["glow"] = "glow.png"
+    lap("layersMs")
+
     sx, sy = DEPTH_OUT[0] / W, DEPTH_OUT[1] / H
     if faces:
         area = np.array([f["w"] * f["h"] for f in faces])
@@ -462,6 +667,8 @@ def main(argv):
         focus = {"x": round(fx, 4), "y": round(fy, 4), "depth": round(fd, 4), "source": "saliency"}
     del sx, sy
     pal = palette(frame)
+    lights = light_sources(frame)
+    tones = tone(frame, card)
     lap("analysisMs")
 
     faces_out = [{k: (round(v) if k != "score" else v) for k, v in f.items()} for f in faces]
@@ -480,10 +687,14 @@ def main(argv):
             "nearIs": 255,
             "mean": round(float(depth.mean()), 4),
             "facesFlattened": len(faces_out),
+            "range": [round(float(np.percentile(depth, 5)), 4), round(float(np.percentile(depth, 95)), 4)],
+            "plateShare": round(plate_share, 4),
         },
         "faces": faces_out,
         "focus": focus,
         "palette": pal,
+        "lights": lights,
+        "tone": tones,
         "models": {"depth": "depth-anything-v2-small", "faces": "yunet-2023mar"},
         "timings": timings,
     }

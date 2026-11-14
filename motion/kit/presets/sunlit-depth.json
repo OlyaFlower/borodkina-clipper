@@ -1,0 +1,16 @@
+{
+  "$schema": "../scene.schema.json",
+  "kit": "kit-2",
+  "name": "sunlit-depth",
+  "about": "A picture with a strong light (the sun, a lamp): the camera pushes gently into the depth while shafts of light fan out from the light and fade; the light glows.",
+  "seed": 20261119,
+  "blocks": [
+    { "block": "parallax", "preset": "subtle", "params": { "camera": "dolly", "amount": 12, "push": 0.016 } },
+    { "block": "god-rays", "preset": "medium" },
+    { "block": "bloom", "preset": "subtle", "timing": { "rhythm": "wave" } },
+    { "block": "colour-breath", "preset": "subtle", "params": { "colour": "warm" } },
+    { "block": "vignette", "preset": "subtle" },
+    { "block": "grain", "preset": "subtle" },
+    { "block": "particles", "preset": "subtle", "params": { "dust": 36, "bokeh": 0, "region": "upper" } }
+  ]
+}

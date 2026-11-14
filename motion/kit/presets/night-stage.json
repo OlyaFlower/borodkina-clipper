@@ -1,0 +1,16 @@
+{
+  "$schema": "../scene.schema.json",
+  "kit": "kit-2",
+  "name": "night-stage",
+  "about": "A dim room or night scene: slow stage beams sweep through haze from above, behind the subject, while the camera rises gently; one soft beat lifts the light.",
+  "seed": 20261115,
+  "beats": [3.6],
+  "blocks": [
+    { "block": "parallax", "preset": "subtle", "params": { "camera": "tilt" } },
+    { "block": "stage-beams", "preset": "medium" },
+    { "block": "light-pulse", "preset": "subtle", "params": { "colour": "light", "radius": 0.7 } },
+    { "block": "vignette", "preset": "subtle" },
+    { "block": "grain", "preset": "subtle" },
+    { "block": "particles", "preset": "subtle", "params": { "bokeh": 0, "dust": 70, "region": "upper" } }
+  ]
+}

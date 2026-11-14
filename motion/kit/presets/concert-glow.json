@@ -1,0 +1,17 @@
+{
+  "$schema": "../scene.schema.json",
+  "kit": "kit-2",
+  "name": "concert-glow",
+  "about": "A dark stage with many lights: the lights swell and bloom on two beats while the room drifts in depth around the crowd; dust hangs in the air.",
+  "seed": 20261114,
+  "beats": [2, 5.6],
+  "blocks": [
+    { "block": "parallax", "preset": "subtle", "params": { "camera": "orbit", "amount": 18 } },
+    { "block": "light-pulse", "preset": "subtle", "params": { "source": "light", "radius": 0.6, "colour": "accent" } },
+    { "block": "bloom", "preset": "medium" },
+    { "block": "colour-breath", "preset": "subtle" },
+    { "block": "vignette", "preset": "subtle" },
+    { "block": "grain", "preset": "subtle" },
+    { "block": "particles", "preset": "subtle", "params": { "region": "upper" } }
+  ]
+}

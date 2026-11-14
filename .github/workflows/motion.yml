@@ -90,15 +90,18 @@ jobs:
       - name: Prepare cover
         run: bash scripts/motion-prepare.sh "$WORK_DIR/source/cover" "$WORK_DIR/prepare"
 
-      # Placeholder for the author step of a later package: until then every job renders the kit's
-      # default composition, recorded as fallback authoring.
+      # Placeholder for the Claude author step of a later package: until then every job renders the
+      # preset the kit's chooser picks from meta.json, recorded as fallback authoring.
       - name: Author composition (fallback)
         run: |
-          echo "COMPOSITION_DIR=$GITHUB_WORKSPACE/motion/kit/default" >> "$GITHUB_ENV"
-          echo '{"authoring":"fallback","model":null,"kitVersion":"kit-1"}' > "$WORK_DIR/motion.json"
+          preset="$(node motion/kit/choose.mjs "$WORK_DIR/prepare/meta.json")"
+          mkdir -p "$WORK_DIR/scene"
+          cp "motion/kit/presets/$preset.json" "$WORK_DIR/scene/scene.json"
+          echo "SCENE_DIR=$WORK_DIR/scene" >> "$GITHUB_ENV"
+          echo '{"authoring":"fallback","model":null,"kitVersion":"kit-2"}' > "$WORK_DIR/motion.json"
 
       - name: Render, encode and verify
-        run: bash scripts/motion-render.sh "$COMPOSITION_DIR" "$WORK_DIR/prepare"
+        run: bash scripts/motion-render.sh "$SCENE_DIR" "$WORK_DIR/prepare"
 
       - name: Quality gates
         run: bash scripts/motion-gates.sh

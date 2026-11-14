@@ -1,0 +1,13 @@
+{
+  "$schema": "../scene.schema.json",
+  "kit": "kit-2",
+  "name": "pencil-reveal",
+  "about": "The brand signature: the cover is drawn over in pencil from its focal point outward, the picture washing towards warm paper while the drawing holds, then the lines lift off.",
+  "seed": 20261118,
+  "blocks": [
+    { "block": "parallax", "preset": "subtle", "params": { "camera": "drift", "amount": 10 } },
+    { "block": "pencil", "preset": "medium" },
+    { "block": "vignette", "preset": "subtle" },
+    { "block": "grain", "preset": "subtle", "params": { "amount": 0.045 } }
+  ]
+}
