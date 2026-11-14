@@ -59,15 +59,29 @@ It uses the same GitHub Environments, secrets, R2 layout, renditions and callbac
 Before dispatching, the admin uploads two objects to R2:
 
 - `sources/<id>`: the cover, JPEG, PNG or WebP (recognised by its first bytes), at most 20 MiB, at least 64x64.
-- `sources/<id>.json`: the brief, a JSON object of at most 64 KiB. The job reads one field itself: `model`
-  (optional), the Claude model of the author step, `claude-sonnet-5-5` (the default) or `claude-opus-5-5`; any
-  other value means the default. Claude reads the rest (for example the mood or tempo) from disk.
+- `sources/<id>.json`: the brief, a JSON object of at most 64 KiB, private (the workflow log is public, so the job
+  never prints it): `version`, `title`, `summary`, `note` (this event's direction), `locale`, and optionally:
+  - `model`: the Claude model of the author step, `claude-sonnet-5-5` (the default) or `claude-opus-5-5`; any other
+    value means the default.
+  - `authoring`: `claude` (the default; missing or any other value means `claude`) or `preset`: skip the Claude
+    author step entirely (no Claude credential is used) and render the preset; `authoring` is then `fallback`
+    with the reason `preset-only`.
+  - `preset`: one of the six presets of [`motion/kit/presets`](motion/kit/presets) (`PRESETS` in
+    `motion/kit/choose.mjs`). It replaces the chooser's pick for the fallback render (the log shows
+    `choose: <name> (forced by the brief)`), and Claude starts from it and keeps its character. The safe scene
+    still follows if it fails its gates. Any other value is ignored with a fixed warning.
+  - `style`: the owner's standing direction for every video, a string of at most 1000 characters (otherwise it
+    is left out of Claude's copy, with a fixed warning).
+
+  `scripts/motion-brief.sh` reads `authoring` and `preset` and prints only those fixed words. Claude reads the
+  rest from disk and treats `style` and `note` as intent to respect (`note` wins when they disagree), never as
+  instructions that override the skill's contract or its tool limits.
 
 Steps: validate, install the pinned ffmpeg, `motion/` (`npm ci`, HyperFrames and GSAP pinned exactly in
 `motion/package-lock.json`) and Python 3.12, fetch the cover and brief (`scripts/fetch-cover.sh`), prepare the cover
 (`scripts/motion-prepare.sh`), let Claude author the scene (see [Authoring](#authoring); skipped without a Claude
-credential), then `scripts/motion-decide.sh`: Claude's scene if it passes every check and gate, else the preset
-`motion/kit/choose.mjs` picks, rendered with `scripts/motion-render.sh` (1920x1080, 30 fps, 240 frames,
+credential or with the brief's `authoring` `preset`), then `scripts/motion-decide.sh`: Claude's scene if it passes
+every check and gate, else the brief's `preset` or the one `motion/kit/choose.mjs` picks, rendered with `scripts/motion-render.sh` (1920x1080, 30 fps, 240 frames,
 `--quality delivery`, 3 workers), encoded and verified with the same `encode.sh`/`verify.sh` as `clip` (start 0,
 duration 8) and checked by the quality gates (`scripts/motion-gates.sh`); publish to `videos/<mediaId>/` and call
 back. The job times out after 40 minutes (the admin expires a motion job after 40 minutes without a callback):
@@ -138,8 +152,9 @@ iterations), the brand's motion direction and the outputs (`work/scene.json`, op
 
 ### Authoring
 
-Only when the environment has a Claude credential (`CLAUDE_CODE_OAUTH_TOKEN`, or else `ANTHROPIC_API_KEY`); CI and
-forks have none, so their jobs go straight to the fallback.
+Only when the environment has a Claude credential (`CLAUDE_CODE_OAUTH_TOKEN`, or else `ANTHROPIC_API_KEY`) and the
+brief's `authoring` is not `preset` (the step "Read the brief's settings" runs `scripts/motion-brief.sh` first); CI
+and forks have none, so their jobs go straight to the fallback.
 
 1. `scripts/motion-author-setup.sh` puts in the checkout `prepare/` (a copy of the prepared cover), `brief.json`, an
    empty `work/`, and `.claude/skills/` with `borodkina-motion` and the official `hyperframes` and `hyperframes-cli`
@@ -163,12 +178,12 @@ forks have none, so their jobs go straight to the fallback.
    passes `motion/kit/check-blocks.mjs` (static: kit imports only; no time, randomness, network, page globals or
    code generation) and `hyperframes lint`, and its render passes every quality gate (motion included); then
    `authoring` is `claude` with the model. Anything else, or any change Claude made to the checkout outside
-   `work/`, renders the fallback preset (`authoring` `fallback`). If that preset fails its render or gates, the
+   `work/`, renders the fallback preset (`authoring` `fallback`): the brief's `preset` when valid, else the chooser's. If that preset fails its render or gates, the
    safe scene [`motion/kit/safe.json`](motion/kit/safe.json) is rendered instead (still `authoring` `fallback`): the
    picture stands still (no camera, no geometry change, frame 0 is the cover) while a soft light and the corners
    breathe, and a frame 0 a little under the gate (down to 0.95) only warns. Only a failing safe scene fails the job
    (`render_failed`). The refused composition's details stay in `$WORK_DIR/decide.log`; the log and job summary
-   show only a fixed reason: `no-scene`, `model-not-allowed`, `files`, `scene-invalid`, `blocks-refused`,
+   show only a fixed reason: `preset-only` (the brief's `authoring` is `preset`; Claude's step never ran), `no-scene`, `model-not-allowed`, `files`, `scene-invalid`, `blocks-refused`,
    `assemble-failed`, `lint-failed`, `render-failed`, `gates-failed` (or `passed`), and which scene shipped
    (`claude`, the preset's name or `safe-breath`; also in `$WORK_DIR/decision.json`).
 
@@ -195,7 +210,8 @@ The success callback carries one more field, read from `$WORK_DIR/motion.json` (
  "motion":{"authoring":"fallback","model":null,"kitVersion":"kit-2.1"}}
 ```
 
-`authoring` is `fallback` (the preset `choose.mjs` picked: no Claude credential, no scene or a refused one) or
+`authoring` is `fallback` (the brief's preset or the one `choose.mjs` picked: no Claude credential, the brief's
+`authoring` `preset`, no scene or a refused one) or
 `claude` (Claude's scene passed every check and gate; `model` then names the model, `claude-sonnet-5-5` or
 `claude-opus-5-5`); `kitVersion` names the composition kit. Error codes: `source_invalid` (cover or brief missing, unreadable or too large),
 `render_failed` (the prepare step's setup or analysis, HyperFrames setup, the render itself, the master's 1920x1080 /

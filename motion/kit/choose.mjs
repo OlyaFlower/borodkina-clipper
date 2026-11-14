@@ -1,5 +1,6 @@
 // Picks the preset scene for a prepared cover, deterministically, from its meta.json alone:
 //   node motion/kit/choose.mjs <meta.json>      prints the preset name (motion/kit/presets/<name>.json)
+//   node motion/kit/choose.mjs --list           prints every preset name, one per line (PRESETS)
 // The fallback authoring uses it; Claude may start from its choice. The rules, first match wins:
 //   1. an extended cover (a poster shown whole as a card)       -> poster-float
 //   2. a face                                                    -> intimate-portrait
@@ -35,6 +36,10 @@ export function choose(meta) {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const path = process.argv[2];
+  if (path === '--list') {
+    console.log(PRESETS.join('\n'));
+    process.exit(0);
+  }
   if (!path) {
     console.error('usage: node motion/kit/choose.mjs <meta.json>');
     process.exit(2);

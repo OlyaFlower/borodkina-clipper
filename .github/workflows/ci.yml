@@ -34,6 +34,9 @@ jobs:
           npm ci --prefix motion --ignore-scripts --no-audit --no-fund
           node motion/kit/test/kit.test.mjs
           for f in motion/kit/presets/*.json motion/kit/safe.json; do node motion/kit/validate.mjs "$f"; done
+      # The brief's job settings (authoring, preset, style) and that no brief value reaches the public log.
+      - name: Motion brief settings tests
+        run: bash tests/motion-brief.test.sh
 
   encode-and-publish:
     runs-on: ubuntu-latest
@@ -179,14 +182,15 @@ jobs:
   # fixture. Claude is never called: its output is simulated. fallback: no work/scene.json; claude: a
   # hand-written scene with a custom block is rendered and gated as Claude's (and motion-author-setup.sh);
   # invalid: broken scenes and unsafe blocks are refused and the fallback is rendered; safe: the chosen
-  # preset fails and the safe scene (motion/kit/safe.json) still gives the job its video.
+  # preset fails and the safe scene (motion/kit/safe.json) still gives the job its video; preset: the
+  # brief's authoring "preset" skips Claude's composition (preset-only) and its preset replaces the chooser's.
   motion-decide:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        case: [fallback, claude, invalid, safe]
+        case: [fallback, claude, invalid, safe, preset]
     env:
       TOOLS_DIR: ${{ github.workspace }}/.tools/bin
       DECIDE_CASE: ${{ matrix.case }}

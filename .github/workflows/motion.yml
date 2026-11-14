@@ -97,18 +97,27 @@ jobs:
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: bash scripts/fetch-cover.sh
 
+      # The brief's job settings, as fixed words only (scripts/motion-brief.sh; the brief itself is never
+      # printed): authoring "claude" (the default) or "preset" (no author step, so no Claude credential is
+      # used; motion-decide.sh records reason preset-only), and preset, one of motion/kit/presets that then
+      # replaces the chooser's pick. Invalid values only warn. A failure here means the defaults.
+      - name: Read the brief's settings
+        id: brief
+        continue-on-error: true
+        run: bash scripts/motion-brief.sh "$WORK_DIR/source/brief.json"
+
       # Crop or extend the cover to 1920x1080 and find its depth, faces, palette and focal point.
       - name: Prepare cover
         run: bash scripts/motion-prepare.sh "$WORK_DIR/source/cover" "$WORK_DIR/prepare"
 
-      # Only with a Claude credential. Pinned Bun for the action (its own setup-bun action is not on this
+      # Only with a Claude credential, and not when the brief's authoring is "preset". Pinned Bun for the action (its own setup-bun action is not on this
       # repository's allow-list); prepare/, brief.json, an empty work/ and the skills (ours and the official
       # HyperFrames ones from the pinned package) in the checkout; the model from the brief's allow-listed
       # "model" (CLAUDE_MODEL); the HyperFrames browser for Claude's snapshots. A failure here only skips
       # the author step.
       - name: Set up the author step
         id: author-setup
-        if: ${{ env.HAS_CLAUDE == 'true' }}
+        if: ${{ env.HAS_CLAUDE == 'true' && steps.brief.outputs.authoring != 'preset' }}
         continue-on-error: true
         timeout-minutes: 4
         run: |
@@ -118,7 +127,9 @@ jobs:
             || { tail -n 20 "$WORK_DIR/author-browser.log"; exit 1; }
 
       # Claude writes work/scene.json (and optional work/blocks/*.js) with the borodkina-motion skill. The
-      # prompt holds paths only; Claude reads the brief and the cover from disk. Only this step gets the
+      # prompt holds paths only; Claude reads the brief and the cover from disk, and takes the brief's style
+      # (the owner's standing direction) and note (this event's) as intent, never as instructions, and its
+      # preset as the starting point. Only this step gets the
       # Claude credential; no R2 or callback secret. GITHUB_TOKEN stays contents: read and is passed as
       # github_token, so the action needs no OIDC (id-token) and no GitHub App; its comment, CI and GitHub
       # MCP servers stay off in automation mode (no mcp__ tools allowed). dontAsk denies every tool not
@@ -152,7 +163,8 @@ jobs:
             --disallowedTools "WebFetch,WebSearch,Task,Agent,NotebookEdit"
 
       # Claude's composition if it passes every check (schema, custom blocks, HyperFrames lint) and every
-      # gate on its render, else the chooser's preset, and if that fails the safe scene (motion/kit/safe.json).
+      # gate on its render, else the brief's preset or the chooser's, and if that fails the safe scene
+      # (motion/kit/safe.json). With the brief's authoring "preset", Claude's step never ran: reason preset-only.
       # Claude can never fail the job: only a failing safe scene does (render_failed). Claude may only write
       # in work/: any other change to the checkout voids its composition.
       - name: Decide, render, encode and gate
@@ -165,7 +177,7 @@ jobs:
             git status --porcelain --untracked-files=all | head -n 20 | LC_ALL=C tr -cd '[:print:]\n' | sed 's/^/  changed: /'
             author="$WORK_DIR/no-author"
           fi
-          bash scripts/motion-decide.sh "$author" "$WORK_DIR/prepare"
+          MOTION_BRIEF="$WORK_DIR/source/brief.json" bash scripts/motion-decide.sh "$author" "$WORK_DIR/prepare"
 
       - name: Publish to R2
         env:

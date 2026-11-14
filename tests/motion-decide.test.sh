@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: motion-decide.test.sh <fallback|claude|invalid>
+# Usage: motion-decide.test.sh <fallback|claude|invalid|safe|preset>
 # Tests scripts/motion-decide.sh (the choice after motion.yml's Claude author step) on the prepared stage
 # fixture, without calling Claude: the author step's output is simulated by hand-written files.
 #   fallback  no work/scene.json (the step was skipped, as without the Claude secret, or wrote nothing)
@@ -13,12 +13,15 @@
 #   safe      the chooser's preset is broken (MOTION_PRESETS_DIR with an invalid concert-glow): its render
 #             fails, the safe scene motion/kit/safe.json is rendered and gated instead, authoring fallback,
 #             scene safe-breath, and the job still gets its video.
+#   preset    the brief (MOTION_BRIEF) says authoring "preset" and preset night-stage: a valid Claude scene in
+#             work/ is not even looked at, night-stage replaces the chooser's concert-glow, authoring fallback,
+#             reason preset-only, and no brief value reaches the log.
 # Needs: ffmpeg, ffprobe, jq, node, Python 3.12 and motion/node_modules.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
-case_name="${1:?usage: motion-decide.test.sh <fallback|claude|invalid|safe>}"
-[[ "$case_name" =~ ^(fallback|claude|invalid|safe)$ ]] || { echo "unknown case $case_name"; exit 2; }
+case_name="${1:?usage: motion-decide.test.sh <fallback|claude|invalid|safe|preset>}"
+[[ "$case_name" =~ ^(fallback|claude|invalid|safe|preset)$ ]] || { echo "unknown case $case_name"; exit 2; }
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 fixture="$root/tests/fixtures/motion/claude-scene"
@@ -155,6 +158,19 @@ case "$case_name" in
     expect fallback null no-scene safe-breath
     jq -e '.frame0Gate == "pass" and .motionGate != "fail"' "$run/gates.json" > /dev/null \
       || { echo "the safe scene's gates: $(cat "$run/gates.json")"; exit 1; }
+    ;;
+
+  preset)
+    mkdir -p "$tmp/work"
+    cp -R "$fixture/." "$tmp/work/"
+    printf '%s\n' '{"version":1,"title":"SECRET-title","note":"SECRET-note","style":"SECRET-style","authoring":"preset","preset":"night-stage"}' \
+      > "$tmp/brief.json"
+    WORK_DIR="$run" MOTION_BRIEF="$tmp/brief.json" CLAUDE_MODEL=claude-opus-5-5 \
+      bash "$root/scripts/motion-decide.sh" "$tmp/work" "$prepared" 2>&1 | tee "$tmp/decide.out"
+    grep -qx 'choose: night-stage (forced by the brief)' "$tmp/decide.out" \
+      || { echo "the forced preset must be printed"; exit 1; }
+    expect fallback null preset-only night-stage
+    if grep -q SECRET "$tmp/decide.out" "$run/decide.log"; then echo "a brief value reached the log"; exit 1; fi
     ;;
 esac
 echo "motion decide test passed: $case_name"

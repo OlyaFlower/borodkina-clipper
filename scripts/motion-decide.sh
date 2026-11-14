@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Usage: motion-decide.sh <author-dir> <prepare-dir>           decide, render and gate (motion.yml)
 #        motion-decide.sh --check <author-dir> <prepare-dir>   only the checks before the render (exit 0/1)
-# Deterministic choice between the composition Claude wrote and the fallback preset, after the author step:
+# Deterministic choice between the composition Claude wrote and the fallback preset, after the author step.
+# With MOTION_BRIEF set, the brief's settings (scripts/motion-brief.sh) apply: authoring "preset" skips 1
+# (Claude's composition is not even looked at; reason preset-only), and a valid "preset" replaces the
+# chooser's pick in 2 (printed as "choose: <name> (forced by the brief)").
 #   1. Claude's composition is <author-dir>/scene.json with optional <author-dir>/blocks/<name>.js. It is
 #      used only if scene.json exists and every check passes, in this order:
 #        - the files: scene.json a plain file, blocks/ only plain files named [a-z][a-z0-9-]*.js;
@@ -12,7 +15,8 @@
 #        - motion-render.sh (render, master checks, encode, verify) and motion-gates.sh with authoring
 #          claude (frame 0 = cover, seamless loop, deterministic snapshots, and it must move).
 #      Then $WORK_DIR/motion.json is {"authoring":"claude","model":$CLAUDE_MODEL,"kitVersion":"kit-2.1"}.
-#   2. Otherwise the preset motion/kit/choose.mjs picks from meta.json is rendered and gated, and
+#   2. Otherwise the brief's preset, or else the one motion/kit/choose.mjs picks from meta.json, is rendered
+#      and gated, and
 #      motion.json is {"authoring":"fallback","model":null,"kitVersion":"kit-2.1"}.
 #   3. If that preset fails its render or gates, the safe scene motion/kit/safe.json (a still picture: no
 #      camera, no geometry change, only a soft light and the corners breathing) is rendered and gated with
@@ -22,10 +26,10 @@
 # motion-render.sh or motion-gates.sh wrote).
 # The workflow log is public, so the details of a refused composition (validator messages, render and
 # gate logs) go to $WORK_DIR/decide.log, never to stdout; only the fixed reason is printed:
-# no-scene, model-not-allowed, files, scene-invalid, blocks-refused, assemble-failed, lint-failed, render-failed or
+# preset-only, no-scene, model-not-allowed, files, scene-invalid, blocks-refused, assemble-failed, lint-failed, render-failed or
 # gates-failed. Writes $WORK_DIR/decision.json {"authoring","reason","scene"} (scene: claude, the preset's
 # name or safe-breath) and a line to the job summary.
-# Env: WORK_DIR; CLAUDE_MODEL (allow-listed; default claude-sonnet-5-5); optional MOTION_CLAUDE_RENDER_LIMIT
+# Env: WORK_DIR; optional MOTION_BRIEF (the brief's path); CLAUDE_MODEL (allow-listed; default claude-sonnet-5-5); optional MOTION_CLAUDE_RENDER_LIMIT
 # and MOTION_CLAUDE_GATES_LIMIT (seconds, default 420 and 240) bound the attempt with Claude's composition;
 # MOTION_PRESETS_DIR (default motion/kit/presets; tests point it at a broken preset).
 set -euo pipefail
@@ -49,6 +53,20 @@ model=""
 for m in "${models[@]}"; do
   if [[ "${CLAUDE_MODEL:-${models[0]}}" == "$m" ]]; then model="$m"; fi
 done
+
+# ---- the brief's settings: fixed words only (scripts/motion-brief.sh); its warnings go to decide.log
+authoring_mode=claude
+forced=""
+if [[ -n "${MOTION_BRIEF:-}" ]]; then
+  settings="$(bash "$here/motion-brief.sh" "$MOTION_BRIEF" 2>> "$log")" || settings=""
+  while IFS='=' read -r key value; do
+    case "$key" in
+      authoring) if [[ "$value" == preset ]]; then authoring_mode=preset; fi ;;
+      preset) forced="$value" ;;
+    esac
+  done <<< "$settings"
+  if [[ -n "$forced" && ! -f "$presets/$forced.json" ]]; then forced=""; fi
+fi
 
 limit() { # seconds command... : runs with a time limit where timeout(1) exists
   local s="$1"; shift
@@ -97,10 +115,15 @@ decided() { # authoring reason scene
   fi
 }
 
-set +e
-reason="$(check_claude)"
-ok=$?
-set -e
+if [[ "$authoring_mode" == preset ]]; then
+  reason="preset-only"
+  ok=1
+else
+  set +e
+  reason="$(check_claude)"
+  ok=$?
+  set -e
+fi
 if $check_only; then
   if (( ok == 0 )); then echo "claude composition passes the checks"; else echo "claude composition refused: $reason"; fi
   exit "$ok"
@@ -123,9 +146,14 @@ if (( ok == 0 )); then
   echo "claude composition refused: $reason; rendering the fallback"
 fi
 
-# ---- 2. the fallback: the chooser's preset, logs shown as usual
+# ---- 2. the fallback: the brief's preset or the chooser's, logs shown as usual
 clean_render
-preset="$(node "$root/motion/kit/choose.mjs" "$prepared/meta.json" || echo none)"
+if [[ -n "$forced" ]]; then
+  preset="$forced"
+  echo "choose: $preset (forced by the brief)"
+else
+  preset="$(node "$root/motion/kit/choose.mjs" "$prepared/meta.json" || echo none)"
+fi
 rm -rf "$work/scene-fallback"
 mkdir -p "$work/scene-fallback"
 cp "$presets/$preset.json" "$work/scene-fallback/scene.json" 2>/dev/null || echo '{}' > "$work/scene-fallback/scene.json"
