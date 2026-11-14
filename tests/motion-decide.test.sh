@@ -58,7 +58,7 @@ case "$case_name" in
     WORK_DIR="$run" bash "$root/scripts/motion-decide.sh" "$tmp/work" "$prepared"
     expect fallback null no-scene
     # A missing author dir (the setup step skipped too) is the same.
-    WORK_DIR="$tmp/check" bash "$root/scripts/motion-decide.sh" --check "$tmp/absent" "$prepared" | grep -qx 'claude composition refused: no-scene'
+    refused no-scene "$tmp/absent"
     ;;
 
   claude)
