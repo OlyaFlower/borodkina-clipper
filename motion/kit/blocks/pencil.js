@@ -49,6 +49,7 @@ uniform float $chalk;
 uniform float $weight;
 uniform float $hatch;
 uniform vec3 $paper;
+uniform float $cardOnly;
 
 const float $CELL = 70.0;
 
@@ -177,7 +178,8 @@ vec3 $apply(vec3 c, Px p) {
   // ---- reveal and return: the paper spreads behind the drawing; the colour floods back from the origin
   float home = smoothstep(ord, ord + 0.09, $back);
   float marks = max(contour * lineIn, hatching) * tooth * (1.0 - smoothstep(ord + 0.04, ord + 0.3, $back));
-  float paperIn = smoothstep(ord + 0.02, ord + 0.09, $draw) * (1.0 - home);
+  // on an extended cover only the card turns into the drawing; its blurred surround stays as it is
+  float paperIn = smoothstep(ord + 0.02, ord + 0.09, $draw) * (1.0 - home) * mix(1.0, p.card, $cardOnly);
 
   // the sketch: warm paper with a soft graphite tone in the forms (or a dark ground with chalk)
   float grainP = vnoise(q * 0.55 + 7.0 + $seed);
@@ -194,7 +196,7 @@ vec3 $apply(vec3 c, Px p) {
   // the colour flooding back leaves a slightly darker tide line, like a wash drying
   float bk = $back - ord;
   float tide = smoothstep(0.0, 0.03, bk) * (1.0 - smoothstep(0.03, 0.1, bk)) * step(bk, 0.5);
-  vec3 under = mix(c, sketch, $wash * paperIn) * (1.0 - 0.1 * tide * $wash);
+  vec3 under = mix(c, sketch, $wash * paperIn) * (1.0 - 0.1 * tide * $wash * mix(1.0, p.card, $cardOnly));
   float k = clamp(marks * $fade, 0.0, 1.0);
   vec3 graphite = mix(under, $ink, k * 0.92);
   vec3 chalk = screen(under, $ink * k * 0.85);
@@ -242,6 +244,7 @@ vec3 $apply(vec3 c, Px p) {
           weight: params.weight,
           hatch: params.hatch,
           paper,
+          cardOnly: kit.mode === 'extend' ? 1 : 0,
         };
       },
     };
