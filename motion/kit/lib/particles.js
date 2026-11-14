@@ -36,7 +36,7 @@ export function createParticles(canvas, { scene, seed = 20261114, intensity = 1 
   const white = [1, 1, 1];
   const colors = (scene.palette?.colors || []).map((c) => rgb(c.hex));
   const light = rgb(scene.palette?.light);
-  const focusDepth = scene.framing?.mode === 'extend' ? 0.3 : (scene.focus?.depth ?? 0.5);
+  const focusDepth = scene.framing?.mode === 'extend' ? 0.4 : (scene.focus?.depth ?? 0.5);
   // Bokeh takes the palette's colours, lifted towards white so it reads as light, never as paint.
   const bokehColor = (i) => mix(colors.length ? colors[i % colors.length] : light, white, 0.55);
   const moteColor = mix(light, white, 0.6);
@@ -77,8 +77,8 @@ export function createParticles(canvas, { scene, seed = 20261114, intensity = 1 
   });
 
   // Camera amplitudes match the parallax layer (parallax.js) so particles sit in the same space.
-  const ax = 9 * intensity;
-  const ay = 5 * intensity;
+  const ax = 11 * intensity;
+  const ay = 6 * intensity;
 
   return (t) => {
     const time = Math.min(Math.max(t, 0), DURATION);

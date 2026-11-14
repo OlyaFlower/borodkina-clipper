@@ -5,7 +5,7 @@ Usage: python -I prepare.py <cover> <out-dir> <depth-model.onnx> <face-model.onn
 Writes into <out-dir>:
   cover.jpg     the 1920x1080 frame every video starts and ends on (JPEG q95, 4:4:4)
   background.jpg  extend mode only: the frame without the card, for moving the card over it
-  depth.png     960x540 8-bit depth, 255 = nearest; smoothed, flattened inside face boxes
+  depth.png     1920x1080 8-bit depth, 255 = nearest; edges snapped to the picture, flat inside faces
   faces.json    [{"x","y","w","h","score"}] face boxes in cover.jpg pixels, [] when none
   palette.json  {"colors":[{"hex","share"}] x5, "light","dark","accent"}
   focus.json    {"x","y" (0..1 of the frame), "depth" (0..1), "source": "faces"|"saliency"}
@@ -339,6 +339,30 @@ def estimate_depth(session, frame, framing, faces):
     return d
 
 
+def box(arr, r):
+    """Mean over a (2r+1)^2 window, edges handled by clamping the window (summed-area table)."""
+    h, w = arr.shape
+    c = np.pad(arr, ((1, 0), (1, 0))).cumsum(0).cumsum(1)
+    y0 = np.clip(np.arange(h) - r, 0, h)
+    y1 = np.clip(np.arange(h) + r + 1, 0, h)
+    x0 = np.clip(np.arange(w) - r, 0, w)
+    x1 = np.clip(np.arange(w) + r + 1, 0, w)
+    total = c[y1][:, x1] - c[y0][:, x1] - c[y1][:, x0] + c[y0][:, x0]
+    return total / ((y1 - y0)[:, None] * (x1 - x0)[None, :])
+
+
+def refine_depth(d, frame, r=6, eps=2e-3):
+    """Upsamples depth to the frame and snaps its edges to the picture's edges (guided filter, He et al.),
+    so the parallax separates a figure from what is behind it along the figure's real outline instead
+    of along the blocky outline of the low-resolution depth. Flat depth (faces) stays flat."""
+    p = np.asarray(Image.fromarray(d).resize((W, H), Image.BILINEAR), dtype=np.float32).astype(np.float64)
+    g = luminance(np.asarray(frame, dtype=np.float32) / 255.0).astype(np.float64)
+    mean_g, mean_p = box(g, r), box(p, r)
+    a = (box(g * p, r) - mean_g * mean_p) / (box(g * g, r) - mean_g * mean_g + eps)
+    b = mean_p - a * mean_g
+    return np.clip(box(a, r) * g + box(b, r), 0, 1).astype(np.float32)
+
+
 # ---------- palette (k-means, deterministic initialisation)
 
 
@@ -417,7 +441,8 @@ def main(argv):
     lap("frameMs")
 
     depth = estimate_depth(ort.InferenceSession(depth_model, opts, providers=providers), frame, framing, faces)
-    Image.fromarray(np.clip(depth * 255 + 0.5, 0, 255).astype(np.uint8)).save(os.path.join(out, "depth.png"))
+    full = refine_depth(depth, frame)
+    Image.fromarray(np.clip(full * 255 + 0.5, 0, 255).astype(np.uint8)).save(os.path.join(out, "depth.png"))
     lap("depthMs")
 
     sx, sy = DEPTH_OUT[0] / W, DEPTH_OUT[1] / H
@@ -451,7 +476,7 @@ def main(argv):
         "framing": framing,
         "files": files,
         "depth": {
-            "size": list(DEPTH_OUT),
+            "size": [W, H],
             "nearIs": 255,
             "mean": round(float(depth.mean()), 4),
             "facesFlattened": len(faces_out),

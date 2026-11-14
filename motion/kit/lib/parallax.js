@@ -44,7 +44,7 @@ float valueNoise(vec2 q) {
 // covers this pixel, so near things (people, crowds) stay crisp in front of what moves behind them.
 // With a zero offset every step samples uv itself: frame 0 is the cover texel for texel.
 vec2 parallax(vec2 uv, vec2 shift, out float depth) {
-  const int STEPS = 14;
+  const int STEPS = 10;
   float hi = 1.0;          // last height that missed
   float lo = 0.0;          // first height that hit
   bool found = false;
@@ -58,7 +58,7 @@ vec2 parallax(vec2 uv, vec2 shift, out float depth) {
     hi = h;
   }
   if (!found) lo = 0.0;
-  for (int j = 0; j < 5; j++) {
+  for (int j = 0; j < 4; j++) {
     float h = 0.5 * (lo + hi);
     if (texture2D(uDepth, uv - shift * (h - uFocusDepth)).r >= h) lo = h; else hi = h;
   }
@@ -78,7 +78,7 @@ void main() {
   if (uExtend > 0.5) {
     // The card moves with the camera, the blurred surround moves the other way; the card is flat,
     // so a poster's lettering never bends.
-    vec2 cardShift = uOffset * (0.6 - uFocusDepth) / uRes;
+    vec2 cardShift = uOffset * (0.8 - uFocusDepth) / uRes;
     vec2 backShift = uOffset * (0.0 - uFocusDepth) / uRes;
     vec2 cuv = uv - cardShift;
     vec2 inside = min(cuv - uCard.xy, uCard.zw - cuv) * uRes;
@@ -88,7 +88,7 @@ void main() {
     vec2 backSrc = clamp(uv - backShift, hp, 1.0 - hp);
     color = mix(texture2D(uBackground, backSrc).rgb, texture2D(uCover, cardSrc).rgb, cover);
     src = mix(backSrc, cardSrc, cover);
-    depth = 0.6 * cover;
+    depth = 0.8 * cover;
   } else {
     // Parallax fades out over the outer 5 % so the frame edges never sample outside the cover.
     vec2 edge = smoothstep(vec2(0.0), vec2(0.05), uv) * smoothstep(vec2(0.0), vec2(0.05), 1.0 - uv);
@@ -189,8 +189,8 @@ export function createParallax(canvas, { cover, depth, background = null, scene,
   gl.uniform1f(u('uExtend'), extend ? 1 : 0);
   const box = scene.framing?.coverBox ?? [0, 0, WIDTH, HEIGHT];
   gl.uniform4f(u('uCard'), box[0] / WIDTH, box[1] / HEIGHT, box[2] / WIDTH, box[3] / HEIGHT);
-  // Extend mode: the card (depth 0.6) and the surround (depth 0) move in opposite directions.
-  gl.uniform1f(u('uFocusDepth'), extend ? 0.3 : (scene.focus?.depth ?? 0.5));
+  // Extend mode: the card (depth 0.8) and the surround (depth 0) move in opposite directions.
+  gl.uniform1f(u('uFocusDepth'), extend ? 0.4 : (scene.focus?.depth ?? 0.5));
   // The sweep is a warm white tinted a quarter of the way towards the cover's lightest colour.
   gl.uniform3fv(u('uSweepColor'), mix([1, 0.95, 0.86], rgb(scene.palette?.light), 0.25));
   const uOffset = u('uOffset');
@@ -201,8 +201,8 @@ export function createParallax(canvas, { cover, depth, background = null, scene,
   gl.viewport(0, 0, WIDTH, HEIGHT);
 
   // Camera amplitudes in pixels per unit of depth: a calm orbit, about 1 % of the width at the most.
-  const ax = 9 * intensity;
-  const ay = 5 * intensity;
+  const ax = 11 * intensity;
+  const ay = 6 * intensity;
 
   return (t) => {
     const time = Math.min(Math.max(t, 0), DURATION);
@@ -210,9 +210,9 @@ export function createParallax(canvas, { cover, depth, background = null, scene,
     const s = swell(time);
     const p = plateau(time);
     gl.uniform2f(uOffset, ax * o.x, ay * o.y);
-    gl.uniform1f(uSweep, 0.22 * intensity * s);
+    gl.uniform1f(uSweep, 0.24 * intensity * s);
     gl.uniform1f(uSweepPos, -0.3 + 1.6 * (time / DURATION));
-    gl.uniform1f(uGrain, 0.035 * intensity * p);
+    gl.uniform1f(uGrain, 0.045 * intensity * p);
     gl.uniform1f(uVignette, 0.14 * intensity * p);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   };
