@@ -64,8 +64,9 @@ Before dispatching, the admin uploads two objects to R2:
 
 Steps: validate, install the pinned ffmpeg, `motion/` (`npm ci`, HyperFrames and GSAP pinned exactly in
 `motion/package-lock.json`) and Python 3.12, fetch the cover and brief (`scripts/fetch-cover.sh`), prepare the cover
-(`scripts/motion-prepare.sh`), author the composition (for now always the kit's default, recorded as fallback authoring),
-render with `scripts/motion-render.sh` (1920x1080, 30 fps, 240 frames, `--quality delivery`, 3 workers), encode and verify
+(`scripts/motion-prepare.sh`), author the scene (for now always the preset `motion/kit/choose.mjs` picks, recorded as
+fallback authoring), render with `scripts/motion-render.sh` (1920x1080, 30 fps, 240 frames, `--quality delivery`, 3
+workers), encode and verify
 with the same `encode.sh`/`verify.sh` as `clip` (start 0, duration 8), check the quality gates (`scripts/motion-gates.sh`),
 publish to `videos/<mediaId>/` and call back. The job times out after 35 minutes.
 
@@ -82,7 +83,10 @@ finish within 2 minutes (about 1-2 s of analysis on the runner, plus the first d
 | `faces.json` | Face boxes in `cover.jpg` pixels, `[{"x","y","w","h","score"}]`, `[]` when none (YuNet). |
 | `palette.json` | Five dominant colours with their share, plus `light`, `dark` and `accent`. |
 | `focus.json` | Focal point `x`, `y` (0..1), its `depth` and `source`: `faces`, or else `saliency` weighted by nearness. |
-| `meta.json` | All of the above for the authoring step, plus the framing, the source size and timings. |
+| `plate.jpg`, `plate-depth.png` | Crop mode only: the cover and its depth with what near edges may hide (within 32 px of a step down in depth) repainted from farther surroundings (push-pull), shown where the parallax reveals it. |
+| `edges.png` | 1920x1080 thin salient edges (luminance and depth silhouettes, one line per edge, above the noise floor), for the pencil block. |
+| `glow.png` | 480x270 blurred highlights of the cover (of the card in extend mode), for the bloom block. |
+| `meta.json` | All of the above for the authoring step (`prepare-2`), plus the framing (extend: the baked shadow), light sources (`lights`: bright spots, brightest first), `tone` (luma, contrast, saturation, warmth, highlights, key dark/mid/light), the depth range, the source size and timings. |
 
 Framing: baked-in letterbox bars (symmetric, near black) are trimmed first. A cover close to 16:9, whose crop would lose
 at most 25 % of its area (4:3 up to about 2.37:1), is cropped, the window aimed at the faces (kept whole) or else at the
@@ -99,26 +103,43 @@ which the workflows cache with `actions/cache`. An unusable cover fails with `so
 
 ### Kit
 
-`motion/kit/lib/` holds the reusable ES modules (kit version `kit-1`): `loop.js` (the 8 s clock, periodic envelopes, the
-camera orbit, a seeded PRNG), `parallax.js` (one WebGL pass: depth parallax by parallax-occlusion marching, so near
-things stay crisp; a card-over-background mode for extended covers; a soft light sweep; paper grain fixed to the picture;
-a vignette), `particles.js` (palette-coloured dust and a few bokeh discs that keep clear of faces) and `scene.js` (the
-prepared scene, image loading behind a HyperFrames build-ready promise, the GSAP/hf-seek clock).
-`motion/kit/default/index.html` is the fallback composition built from them; its variables are `intensity` (default 1)
-and `seed`. `motion-render.sh` renders a private copy with `kit/`, the pinned GSAP and the prepared files in `assets/`,
-and `assets/scene.js` setting `window.__MOTION_SCENE` to `meta.json`.
+Motion kit 2 (`kit-2`, reference: [`motion/kit/API.md`](motion/kit/API.md)) composes a video from a **scene spec**: a
+JSON list of **blocks** with intensity presets (`subtle`, `medium`), parameters and rhythms (`primary` beats,
+`reactive` answers, `ambient`, `wave`), validated by `motion/kit/scene.schema.json` (generated from the blocks by
+`motion/kit/schema.mjs`) and by `motion/kit/validate.mjs`. `motion/kit/compose/index.html` renders any spec: one WebGL
+pass assembled from the base and pixel blocks, plus a 2D overlay. The blocks (`motion/kit/blocks/`, one module each):
+`parallax` (2.5D depth parallax with an orbit, drift, tilt or dolly camera around the subject's depth; the occlusion
+plate fills what near edges reveal instead of smearing them; on an extended cover a rigid card), `card-float` (the poster
+card floats as a rigid, bicubic-sampled plane with its shadow), `light-sweep`, `god-rays` (only where nothing nearer
+blocks the light), `stage-beams`, `bloom`, `grain` (anchored to the picture), `colour-breath`, `vignette`, `pencil`
+(the brand's graphite or chalk line drawing with tonal hatching over a warm paper wash), `light-pulse` (the beats) and
+`particles`. Six presets in `motion/kit/presets/` (`concert-glow`, `night-stage`, `intimate-portrait`, `poster-float`,
+`pencil-reveal`, `sunlit-depth`); `motion/kit/choose.mjs` picks one deterministically from `meta.json` (framing, faces,
+tone, lights) for the fallback.
 
-The motion is calm on purpose: a tiny elliptical camera orbit (at most about 22 px between the nearest and the farthest
-plane, no zoom) pivoting on the focal plane, so faces, which are flat in depth, move as one piece or not at all. Every
-effect is a pure function of t built from whole periods of the loop and fades to exactly zero at t = 0, so frame 0 is the
-cover pixel for pixel and the last frame runs into the first; every random choice is seeded.
+`scripts/motion-assemble.sh <scene-dir> <prepare-dir> <out>` validates `<scene-dir>/scene.json` and builds the HyperFrames
+project (the compose page, the kit, custom blocks from `<scene-dir>/blocks/`, the pinned GSAP, the prepared files,
+`assets/scene.js` and `assets/spec.js`); `motion-render.sh <scene-dir> <prepare-dir>` assembles and renders it.
+
+Every block is a pure function of t built from whole periods of the loop and multiplied by its rhythm's envelope, which
+is exactly zero at t = 0 and t = 8 with zero slope, so frame 0 is the cover pixel for pixel and the last frame runs into
+the first; every random choice is seeded. Faces are flat in depth and the camera pivots on the subject, so faces move
+as one piece or not at all.
+
+The authoring skill for Claude, [`motion/skills/borodkina-motion/SKILL.md`](motion/skills/borodkina-motion/SKILL.md),
+teaches the contract, the work loop (assemble, `hyperframes check`, snapshots at 0/2/4/6/8 s, critique, at most four
+iterations), the brand's motion direction and the outputs (`work/scene.json`, optional `work/blocks/*.js`,
+`work/REVIEW.md`).
 
 ### Quality gates
 
 `scripts/motion-gates.sh` fails the job with `render_failed` unless the master and every rendition last 8 s within one
-frame, frame 0 matches the prepared cover (SSIM >= 0.98), the last frame matches frame 0 (SSIM >= 0.98), the middle frame
-differs (SSIM < 0.97), and three frames (0.5 s, 4 s, 6.5 s) snapshotted twice with HyperFrames on software WebGL are
-pixel-identical (at least SSIM >= 0.999). It writes `$WORK_DIR/gates.json` and a table to the job summary.
+frame, frame 0 matches the prepared cover (SSIM >= 0.98), the last frame matches frame 0 (SSIM >= 0.98), and five frames
+(0, 2, 4, 6, 8 s) snapshotted twice with HyperFrames on software WebGL are pixel-identical (at least SSIM >= 0.999).
+It also checks that the composition moves: `scripts/motion-measure.py` scores the luminance change of the 2, 4 and 6 s
+snapshots against frame 0 relative to the cover's own gradient (roughly pixels of apparent motion, so a flat cover is
+judged as fairly as a textured one); below 0.25 a composition Claude wrote fails, while the fallback only warns, so a
+calm fixed preset never fails a job. It writes `$WORK_DIR/gates.json` and a table to the job summary.
 
 Outputs: the same five files as `clip` (`1280.av1.webm`, `640.av1.webm`, `1280.h264.mp4`, `640.h264.mp4`, `poster.webp`),
 duration 8 s, and the poster is frame 0, the cover itself.
@@ -127,7 +148,7 @@ The success callback carries one more field, read from `$WORK_DIR/motion.json` (
 
 ```json
 {"status":"succeeded","renditions":[{"file":"1280.av1.webm","bytes":123}],"poster":{"bytes":456},"durationMs":8000,
- "motion":{"authoring":"fallback","model":null,"kitVersion":"kit-1"}}
+ "motion":{"authoring":"fallback","model":null,"kitVersion":"kit-2"}}
 ```
 
 `authoring` is `fallback` (a fixed composition) or `claude` (written by Claude, `model` then names the model);
@@ -182,11 +203,18 @@ exhausts it, so the VM freezes on `[download] Destination: …` and the `contain
 
 `.github/workflows/ci.yml` runs shellcheck, input validation tests (including injection attempts), a real encode of a generated 1080p60 fixture
 with all ffprobe assertions, and the publish and callback path against a local S3 stand-in (moto) and a local HMAC-verifying server.
-The `motion-render` job runs `tests/motion-kit.test.sh` for three generated covers in `tests/fixtures/motion`
-(`make-fixtures.py` draws them; no third-party images): `stage` (16:10 concert, cropped, no faces), `poster` (4:5 drawn
-portrait with title bars, extended, its drawn face detected) and `landscape` (2.2:1 hills, cropped). Each runs the prepare
-unit tests (`tests/motion_prepare_test.py`: flat faces in depth, crop keeps faces, extension, letterbox pairs, palette,
-broken images), checks that a non-image cover is `source_invalid`, then prepare, the kit render, encode, verify and the
-quality gates. Timings and gate values go to the job summary, and the three determinism snapshots of each fixture are kept
-as the `motion-snapshots-<fixture>` artifact for 14 days (fixtures only, never real covers).
+The lint job also runs the motion kit's unit tests (`motion/kit/test/kit.test.mjs`: the schema is generated from the
+blocks, every preset is valid, every block is at rest at 0 and 8 s for both intensities, rhythms and camera paths are
+loop-safe, the validator refuses broken specs, the chooser) and validates every preset against the schema.
+The `motion-render` job runs `tests/motion-kit.test.sh <fixture> <preset>` on four generated covers in
+`tests/fixtures/motion` (`make-fixtures.py` draws them; no third-party images): `stage` (16:10 concert, cropped, no faces;
+chooses `concert-glow`), `poster` (4:5 drawn portrait with title bars, extended, its drawn face detected; `poster-float`),
+`landscape` (2.2:1 hills at dusk, cropped, the sun a light; `sunlit-depth`) and `flat` (an almost uniform dark wash, the
+worst case for the motion gate; `night-stage`), each with the chooser's preset, plus every other preset on `stage`. With
+the chooser it also runs the prepare unit tests (`tests/motion_prepare_test.py`: flat faces in depth, crop keeps faces,
+extension, letterbox pairs, palette, occlusion plate, edges, lights and tone, broken images) and checks that a non-image
+cover is `source_invalid`; then prepare, the render, encode, verify and the quality gates. The `motion-presets` job
+(`tests/motion-presets.test.sh`) snapshots every preset on every fixture at 0, 2, 4, 6 and 8 s without a full render and
+checks frame 0, the seam and motion. Timings and gate values go to the job summary; the snapshots are kept as the
+`motion-snapshots-<fixture>-<preset>` and `motion-preset-snapshots` artifacts for 14 days (fixtures only, never real covers).
 The `clip` and `motion` workflows are never triggered by CI.

@@ -14,13 +14,13 @@ export default {
     amount: { type: 'number', min: 0, max: 0.7, default: 0.22, about: 'peak strength' },
     source: { type: 'enum', values: ['light', 'top', 'focus'], default: 'light', about: 'where the rays start: the brightest light of the cover (else the top), the top centre, or the focal point' },
     reach: { type: 'number', min: 0.2, max: 1.5, default: 0.7, about: 'fall-off length, share of the frame height' },
-    rays: { type: 'number', min: 4, max: 24, default: 11, about: 'angular frequency of the shafts' },
+    rays: { type: 'number', min: 4, max: 24, default: 7, about: 'angular frequency of the shafts' },
     turn: { type: 'number', min: 0, max: 0.2, default: 0.06, about: 'how far the fan turns and back, radians' },
     colour: { type: 'colour', default: 'light' },
   },
   presets: {
     subtle: { amount: 0.18, turn: 0.05 },
-    medium: { amount: 0.3, turn: 0.08 },
+    medium: { amount: 0.26, turn: 0.08 },
   },
   glsl: `
 uniform float $amount;
@@ -36,7 +36,7 @@ vec3 $apply(vec3 c, Px p) {
   float r = length(d);
   float a = atan(d.y, d.x) + $spin;
   vec2 ring = vec2(cos(a), sin(a)) * $rays * 0.5;
-  float shafts = smoothstep(0.3, 0.9, fbm(ring + 3.1)) * (0.55 + 0.45 * vnoise(ring * 2.3 + 9.0));
+  float shafts = smoothstep(0.25, 0.95, fbm(ring + 3.1)) * (0.6 + 0.4 * vnoise(ring * 1.7 + 9.0));
   float fall = exp(-r / $reach) * smoothstep(0.0, 0.06, r);
   // Light reaches this pixel only if nothing nearer than the light stands between them: eight depth
   // samples on the way to the light (the pixel itself first), so shafts show in the air and through

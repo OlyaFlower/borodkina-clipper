@@ -21,6 +21,10 @@ export async function loadBlocks(spec) {
     }
     const mod = (await import(url.href)).default;
     if (!mod || typeof mod.setup !== 'function') throw new Error(`motion kit: block ${name} has no default export with setup()`);
+    if (name.startsWith(CUSTOM_PREFIX) && mod.stage !== 'pixel' && mod.stage !== 'overlay')
+      throw new Error(`motion kit: custom block ${name} must be a pixel or overlay block`);
+    if ((mod.stage === 'pixel' || mod.stage === 'base') && typeof mod.glsl !== 'string')
+      throw new Error(`motion kit: block ${name} has no glsl`);
     out[name] = { ...mod, name };
   }
   return out;

@@ -72,9 +72,9 @@ vec3 $apply(vec3 c, Px p) {
   float contour = clamp(e * 2.0, 0.0, 1.0) * pressure;
   // Tonal hatching: shadows in graphite (lights in chalk), a second direction in the deepest tones.
   float tone = mix(1.0 - p.luma, p.luma, $chalk);
-  float h1 = $strokes(s, 0.82, 9.0) * smoothstep(0.3, 0.6, tone);
-  float h2 = $strokes(s, -0.74, 10.0) * smoothstep(0.55, 0.85, tone);
-  float hatching = max(h1, 0.85 * h2) * $hatch * mix(0.6, 1.0, pressure);
+  float h1 = $strokes(s, 0.82, 9.0) * smoothstep(0.45, 0.72, tone);
+  float h2 = $strokes(s, -0.74, 11.0) * smoothstep(0.72, 0.92, tone);
+  float hatching = max(h1, 0.6 * h2) * $hatch * mix(0.6, 1.0, pressure);
   // Reveal outward from the origin, in clusters, like strokes laid down by hand.
   float dist = length((p.src - $origin) * vec2(1.7778, 1.0)) / 1.6;
   float order = clamp(dist + 0.22 * (fbm(q * 0.006 + 2.0) - 0.5), 0.0, 1.0);
@@ -83,7 +83,7 @@ vec3 $apply(vec3 c, Px p) {
   // The picture turns towards a toned sketch on warm paper: values compressed into the paper's
   // range, colour mostly gone (graphite), or a dark toned ground (chalk).
   float l = p.luma;
-  vec3 sketch = mix($paper * mix(0.62, 1.0, l), mix(vec3(0.09, 0.08, 0.08), $paper * 0.35, l), $chalk);
+  vec3 sketch = mix($paper * mix(0.76, 1.02, l), mix(vec3(0.09, 0.08, 0.08), $paper * 0.35, l), $chalk);
   vec3 washed = mix(c, mix(sketch, c, 0.3), $wash * smoothstep(order - 0.05, order + 0.2, $draw));
   vec3 graphite = mix(washed, $ink, mark * 0.85);
   vec3 chalk = screen(washed, $ink * mark * 0.8);

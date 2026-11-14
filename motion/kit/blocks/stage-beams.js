@@ -76,7 +76,10 @@ vec3 $apply(vec3 c, Px p) {
       return sat(c) < 0.12 ? kit.light('warm') : kit.light(name);
     };
     const cols = [lamp(params.colour), lamp('light'), lamp('c1'), lamp('accent')];
-    const near = Math.min(0.85, Math.max(0.3, kit.focusDepth + 0.05));
+    // Beams pass behind what is nearer than the subject. A featureless cover (almost no contrast) has
+    // no meaningful depth (the model invents a ramp), so nothing occludes there.
+    const featureless = (kit.scene.tone?.contrast ?? 1) < 0.05;
+    const near = featureless ? 2 : Math.min(0.85, Math.max(0.3, kit.focusDepth + 0.05));
     return {
       uniforms: (t, env) => {
         const u = phase(t);

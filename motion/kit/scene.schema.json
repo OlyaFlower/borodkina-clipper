@@ -228,7 +228,7 @@
           "type": "number",
           "minimum": 4,
           "maximum": 24,
-          "default": 11,
+          "default": 7,
           "description": "angular frequency of the shafts"
         },
         "turn": {
