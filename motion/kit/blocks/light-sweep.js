@@ -30,8 +30,12 @@ uniform float $cardOnly;
 
 vec3 $apply(vec3 c, Px p) {
   float along = (dot(vec2(p.uv.x * 1.7778, p.uv.y), $dir) - $range.x) / ($range.y - $range.x);
-  float band = exp(-pow((along - $pos) / $width, 2.0));
-  float glint = 0.35 * exp(-pow((along - $pos + 0.6 * $width) / (0.25 * $width), 2.0));
+  // Squares, not pow(x, 2.0): GLSL leaves pow undefined for x < 0 (NaN on some drivers), and a NaN
+  // survives the zero amount at t = 0, so frame 0 would no longer be the cover.
+  float b = (along - $pos) / $width;
+  float g = (along - $pos + 0.6 * $width) / (0.25 * $width);
+  float band = exp(-b * b);
+  float glint = 0.35 * exp(-g * g);
   float mask = mix(1.0, p.card, $cardOnly);
   float lit = (band + glint * $cardOnly) * mask * (0.3 + 0.7 * p.luma) * (0.75 + 0.25 * p.depth);
   return screen(c, $colour * ($amount * lit));

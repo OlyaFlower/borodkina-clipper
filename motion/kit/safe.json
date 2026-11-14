@@ -1,0 +1,12 @@
+{
+  "$schema": "./scene.schema.json",
+  "kit": "kit-2.1",
+  "name": "safe-breath",
+  "about": "The last resort of scripts/motion-decide.sh when the chosen preset fails its gates: the cover never moves (a still camera, no geometry change, identity at t = 0); only a soft warm light breathes once around the focal point and the corners breathe with it.",
+  "seed": 20261118,
+  "blocks": [
+    { "block": "parallax", "params": { "amount": 0, "push": 0 } },
+    { "block": "light-pulse", "params": { "amount": 0.12, "radius": 0.7, "source": "focus", "breaths": 1, "colour": "warm" }, "timing": { "rhythm": "ambient" } },
+    { "block": "vignette", "params": { "amount": 0.18, "breath": 0.5 } }
+  ]
+}

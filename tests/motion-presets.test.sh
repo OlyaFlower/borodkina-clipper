@@ -19,13 +19,16 @@ py="$(bash "$root/scripts/motion-prepare.sh" --setup)"
 
 rows=()
 failed=0
-for fixture in stage poster landscape flat portrait; do
+for fixture in stage poster landscape flat portrait vivid; do
   mkdir -p "$work/$fixture/source"
-  cp "$root/tests/fixtures/motion/$fixture.jpg" "$work/$fixture/source/cover"
+  for ext in jpg png; do
+    if [[ -f "$root/tests/fixtures/motion/$fixture.$ext" ]]; then cp "$root/tests/fixtures/motion/$fixture.$ext" "$work/$fixture/source/cover"; fi
+  done
   WORK_DIR="$work/$fixture" bash "$root/scripts/motion-prepare.sh" "$work/$fixture/source/cover" "$work/$fixture/prepare" 2> /dev/null
   mode="$(jq -r .framing.mode "$work/$fixture/prepare/meta.json")"
   chosen="$(node "$root/motion/kit/choose.mjs" "$work/$fixture/prepare/meta.json" 2> /dev/null)"
-  for spec in "$root"/motion/kit/presets/*.json; do
+  # Every preset, then the safe scene motion-decide.sh falls back to when a preset fails.
+  for spec in "$root"/motion/kit/presets/*.json "$root/motion/kit/safe.json"; do
     preset="$(basename "$spec" .json)"
     if [[ "$(jq -r '.blocks[0].block' "$spec")" == card-float && "$mode" != extend ]]; then continue; fi
     scene="$work/scene-$preset"

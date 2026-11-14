@@ -9,7 +9,11 @@
 #   poster     4:5 drawn portrait: blurred extension, the drawn face is detected     -> poster-float;
 #   landscape  2.2:1 hills at dusk: cropped, no faces, the sun is a light            -> sunlit-depth;
 #   flat       an almost uniform dark wash: no edges, no lights                      -> night-stage;
-#   portrait   a painted face in a dim room: cropped, the face is detected           -> intimate-portrait.
+#   portrait   a painted face in a dim room: cropped, the face is detected           -> intimate-portrait;
+#   vivid      a saturated graphic poster (RGBA PNG) covered in small coloured lettering: blurred
+#              extension, no faces -> poster-float. The frame-0 regression: its master's colour SSIM
+#              against the cover must stay under 0.98 (the 4:2:0 encode loses its chroma, so the fixture
+#              still reproduces the problem) while the frame-0 gate (luma, lossless snapshot) passes.
 # Copies the five gate snapshots (0, 2, 4, 6, 8 s) to $SNAPSHOT_DIR/<fixture>-<preset>/ when set.
 # Needs: ffmpeg, ffprobe, jq, node, Python 3.12 and motion/node_modules. Writes timings to $GITHUB_STEP_SUMMARY when set.
 set -euo pipefail
@@ -17,7 +21,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
 fixture="${1:?usage: motion-kit.test.sh <fixture> [<preset>|auto]}"
 preset="${2:-auto}"
-[[ "$fixture" =~ ^(stage|poster|landscape|flat|portrait)$ ]] || { echo "unknown fixture $fixture"; exit 2; }
+[[ "$fixture" =~ ^(stage|poster|landscape|flat|portrait|vivid)$ ]] || { echo "unknown fixture $fixture"; exit 2; }
 [[ "$preset" == auto || -f "$root/motion/kit/presets/$preset.json" ]] || { echo "unknown preset $preset"; exit 2; }
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
@@ -37,7 +41,9 @@ fi
 # ---- prepare; the cover has no extension, like sources/<id> fetched from R2
 run="$work/run"
 mkdir -p "$run/source"
-cp "$root/tests/fixtures/motion/$fixture.jpg" "$run/source/cover"
+for ext in jpg png; do
+  if [[ -f "$root/tests/fixtures/motion/$fixture.$ext" ]]; then cp "$root/tests/fixtures/motion/$fixture.$ext" "$run/source/cover"; fi
+done
 WORK_DIR="$run" bash "$root/scripts/motion-prepare.sh" "$run/source/cover" "$run/prepare"
 meta="$run/prepare/meta.json"
 mode="$(jq -r .framing.mode "$meta")"
@@ -49,6 +55,10 @@ case "$fixture" in
       || { echo "poster: expected extend with a face, got $mode, $faces"; exit 1; }
     ;;
   portrait) [[ "$mode" == crop && "$faces" -ge 1 ]] || { echo "portrait: expected crop with a face, got $mode, $faces"; exit 1; } ;;
+  vivid)
+    [[ "$mode" == extend && "$faces" == 0 && -s "$run/prepare/background.jpg" ]] \
+      || { echo "vivid: expected extend without faces, got $mode, $faces"; exit 1; }
+    ;;
 esac
 if [[ "$mode" == crop ]]; then
   [[ -s "$run/prepare/plate.jpg" && -s "$run/prepare/plate-depth.png" ]] || { echo "crop mode needs the occlusion plate"; exit 1; }
@@ -64,7 +74,7 @@ size="$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -
 # ---- the fallback author step: the chooser's preset (motion.yml does the same)
 chosen="$(node "$root/motion/kit/choose.mjs" "$meta")"
 if [[ "$preset" == auto ]]; then
-  declare -A expected=([stage]=concert-glow [poster]=poster-float [landscape]=sunlit-depth [flat]=night-stage [portrait]=intimate-portrait)
+  declare -A expected=([stage]=concert-glow [poster]=poster-float [landscape]=sunlit-depth [flat]=night-stage [portrait]=intimate-portrait [vivid]=poster-float)
   [[ "$chosen" == "${expected[$fixture]}" ]] || { echo "$fixture: the chooser picked $chosen, expected ${expected[$fixture]}"; exit 1; }
   preset="$chosen"
 fi
@@ -94,6 +104,12 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   } >> "$GITHUB_STEP_SUMMARY"
 fi
 WORK_DIR="$run" bash "$root/scripts/motion-gates.sh"
+if [[ "$fixture" == vivid ]]; then
+  # The regression stays meaningful only while the encode still loses this cover's chroma.
+  jq -e '.ssimFrame0CoverColour < 0.98 and .frame0Gate == "pass"' "$run/gates.json" > /dev/null \
+    || { echo "vivid: expected a colour SSIM under 0.98 and a passing frame-0 gate: $(jq -c . "$run/gates.json")"; exit 1; }
+  echo "vivid: colour SSIM $(jq .ssimFrame0CoverColour "$run/gates.json") (lost chroma), frame-0 gate passed"
+fi
 
 if [[ -n "${SNAPSHOT_DIR:-}" ]]; then
   mkdir -p "$SNAPSHOT_DIR/$fixture-$preset"

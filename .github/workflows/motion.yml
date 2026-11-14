@@ -36,7 +36,8 @@ jobs:
   motion:
     runs-on: ubuntu-latest
     # The admin expires a motion job after 40 minutes without a callback. Budget: setup and prepare ~3,
-    # author <= 15, decide (Claude's render and gates <= 11, else the fallback's ~5), encode and publish ~2.
+    # author <= 15, decide (Claude's render and gates <= 11, else the fallback's ~5, and only if that preset
+    # fails the safe scene's ~4), encode and publish ~2.
     timeout-minutes: 40
     environment: ${{ inputs.env }}
     # Inputs reach scripts only through env. Nothing below interpolates inputs into a run: block.
@@ -151,11 +152,11 @@ jobs:
             --disallowedTools "WebFetch,WebSearch,Task,Agent,NotebookEdit"
 
       # Claude's composition if it passes every check (schema, custom blocks, HyperFrames lint) and every
-      # gate on its render, else the chooser's preset. Claude can never fail the job: only a failing
-      # fallback does (render_failed). Claude may only write in work/: any other change to the checkout
-      # voids its composition.
+      # gate on its render, else the chooser's preset, and if that fails the safe scene (motion/kit/safe.json).
+      # Claude can never fail the job: only a failing safe scene does (render_failed). Claude may only write
+      # in work/: any other change to the checkout voids its composition.
       - name: Decide, render, encode and gate
-        timeout-minutes: 18
+        timeout-minutes: 22
         run: |
           author="$GITHUB_WORKSPACE/work"
           if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
