@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: install-tools.sh <ffmpeg|yt-dlp|deno>...   Installs pinned, sha256-verified tools into $TOOLS_DIR
+# Usage: install-tools.sh <ffmpeg|yt-dlp|deno|bun>...   Installs pinned, sha256-verified tools into $TOOLS_DIR
 # (default $RUNNER_TEMP/bin) and adds that directory to $GITHUB_PATH when running in Actions.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +45,15 @@ for tool in "$@"; do
       check "$sum" "$tmp/deno.zip"
       unzip -q -o "$tmp/deno.zip" -d "$tmp/dn"
       install -m 0755 "$tmp/dn/deno" "$dir/deno"
+      ;;
+    bun)
+      asset=bun-linux-x64; sum="$BUN_SHA256_X64"
+      if [[ "$arch" == arm64 ]]; then asset=bun-linux-aarch64; sum="$BUN_SHA256_ARM64"; fi
+      curl -fsSL --retry 3 -o "$tmp/bun.zip" \
+        "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/${asset}.zip"
+      check "$sum" "$tmp/bun.zip"
+      unzip -q -o "$tmp/bun.zip" -d "$tmp/bn"
+      install -m 0755 "$tmp/bn/$asset/bun" "$dir/bun"
       ;;
     *) echo "unknown tool: $tool" >&2; exit 2 ;;
   esac

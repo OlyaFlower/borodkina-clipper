@@ -1,0 +1,184 @@
+name: motion
+
+# Turns an event cover into an 8-second silent seamless-loop preview video with HyperFrames.
+# Dispatched by the admin; see "Motion videos" in README.md for the protocol.
+on:
+  workflow_dispatch:
+    inputs:
+      jobId:
+        description: Job id (A-Z a-z 0-9 _ -, 1-64)
+        required: true
+        type: string
+      mediaId:
+        description: Media id (A-Z a-z 0-9 _ -, 1-64)
+        required: true
+        type: string
+      env:
+        description: dev or prod
+        required: true
+        type: string
+      sourceKey:
+        description: R2 key sources/<id> of the cover; the brief is sources/<id>.json
+        required: true
+        type: string
+      callbackUrl:
+        description: Admin callback URL
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: motion-${{ inputs.jobId }}
+
+jobs:
+  motion:
+    runs-on: ubuntu-latest
+    # The admin expires a motion job after 40 minutes without a callback. Budget: setup and prepare ~3,
+    # author <= 15, decide (Claude's render and gates <= 11, else the fallback's ~5), encode and publish ~2.
+    timeout-minutes: 40
+    environment: ${{ inputs.env }}
+    # Inputs reach scripts only through env. Nothing below interpolates inputs into a run: block.
+    env:
+      JOB_ID: ${{ inputs.jobId }}
+      MEDIA_ID: ${{ inputs.mediaId }}
+      CLIPPER_ENV: ${{ inputs.env }}
+      SOURCE_KEY: ${{ inputs.sourceKey }}
+      CALLBACK_URL: ${{ inputs.callbackUrl }}
+      DURATION_SEC: '8'
+      # Only "true" or "false": whether this environment has a Claude credential. The credential itself is
+      # given to the author step alone. CI and forks have none, so their jobs skip it (fallback).
+      HAS_CLAUDE: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' || secrets.ANTHROPIC_API_KEY != '' }}
+      HYPERFRAMES_NO_UPDATE_CHECK: '1'
+      HYPERFRAMES_NO_TELEMETRY: '1'
+      # Claude Code strips Anthropic, cloud and GitHub credentials from the environment of the commands it
+      # runs (read by claude-code-action from the job env).
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs
+        run: bash scripts/validate-inputs.sh motion
+
+      # The runner context is not available in job-level env, so the work dir is set here.
+      - name: Prepare work dir
+        run: |
+          echo "WORK_DIR=$RUNNER_TEMP/motion" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/motion"
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # Python 3.12 for the prepare step; its packages and models are pinned by sha256 and cached.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/borodkina-motion
+          key: motion-prepare-${{ runner.os }}-${{ hashFiles('motion/prepare/requirements.txt', 'motion/prepare/models.env') }}
+
+      - name: Install ffmpeg and HyperFrames
+        run: |
+          bash scripts/install-tools.sh ffmpeg
+          npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+
+      - name: Fetch cover and brief
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: bash scripts/fetch-cover.sh
+
+      # Crop or extend the cover to 1920x1080 and find its depth, faces, palette and focal point.
+      - name: Prepare cover
+        run: bash scripts/motion-prepare.sh "$WORK_DIR/source/cover" "$WORK_DIR/prepare"
+
+      # Only with a Claude credential. Pinned Bun for the action (its own setup-bun action is not on this
+      # repository's allow-list); prepare/, brief.json, an empty work/ and the skills (ours and the official
+      # HyperFrames ones from the pinned package) in the checkout; the model from the brief's allow-listed
+      # "model" (CLAUDE_MODEL); the HyperFrames browser for Claude's snapshots. A failure here only skips
+      # the author step.
+      - name: Set up the author step
+        id: author-setup
+        if: ${{ env.HAS_CLAUDE == 'true' }}
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          bash scripts/install-tools.sh bun
+          bash scripts/motion-author-setup.sh "$WORK_DIR/prepare" "$WORK_DIR/source/brief.json" "$GITHUB_WORKSPACE"
+          motion/node_modules/.bin/hyperframes browser ensure > "$WORK_DIR/author-browser.log" 2>&1 \
+            || { tail -n 20 "$WORK_DIR/author-browser.log"; exit 1; }
+
+      # Claude writes work/scene.json (and optional work/blocks/*.js) with the borodkina-motion skill. The
+      # prompt holds paths only; Claude reads the brief and the cover from disk. Only this step gets the
+      # Claude credential; no R2 or callback secret. GITHUB_TOKEN stays contents: read and is passed as
+      # github_token, so the action needs no OIDC (id-token) and no GitHub App; its comment, CI and GitHub
+      # MCP servers stay off in automation mode (no mcp__ tools allowed). dontAsk denies every tool not
+      # allowed below: reads in the checkout, edits in work/ only, and the exact kit commands the skill
+      # uses. The transcript is never printed (show_full_output, display_report off). Never fails the job.
+      - name: Author composition (Claude)
+        id: author
+        if: ${{ steps.author-setup.outcome == 'success' }}
+        continue-on-error: true
+        timeout-minutes: 15
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          path_to_bun_executable: ${{ runner.temp }}/bin/bun
+          show_full_output: 'false'
+          display_report: 'false'
+          classify_inline_comments: 'false'
+          prompt: >-
+            /borodkina-motion Compose this job's cover loop with motion kit 2.1 (kit-2.1). The working directory is
+            the clipper checkout. Inputs: prepare/ (meta.json, cover.jpg, depth.png, edges.png, glow.png and the
+            other prepared files) and brief.json (the brief). Outputs: work/scene.json, optional
+            work/blocks/<name>.js and work/REVIEW.md. Only the commands the skill names are allowed.
+          claude_args: >-
+            --model ${{ env.CLAUDE_MODEL }}
+            --max-turns 40
+            --permission-mode dontAsk
+            --setting-sources project
+            --allowedTools "Read(./**),Edit(./work/**),Write(./work/**),Skill,Bash(bash scripts/motion-assemble.sh work prepare work/project),Bash(node motion/kit/validate.mjs:*),Bash(node motion/kit/check-blocks.mjs:*),Bash(node motion/kit/choose.mjs:*),Bash(npx --prefix motion hyperframes lint work/project:*),Bash(npx --prefix motion hyperframes check work/project:*),Bash(npx --prefix motion hyperframes snapshot work/project:*),Bash(bash scripts/motion-measure.sh:*)"
+            --disallowedTools "WebFetch,WebSearch,Task,Agent,NotebookEdit"
+
+      # Claude's composition if it passes every check (schema, custom blocks, HyperFrames lint) and every
+      # gate on its render, else the chooser's preset. Claude can never fail the job: only a failing
+      # fallback does (render_failed). Claude may only write in work/: any other change to the checkout
+      # voids its composition.
+      - name: Decide, render, encode and gate
+        timeout-minutes: 18
+        run: |
+          author="$GITHUB_WORKSPACE/work"
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "::warning::The author step changed the checkout outside work/; its composition is ignored"
+            author="$WORK_DIR/no-author"
+          fi
+          bash scripts/motion-decide.sh "$author" "$WORK_DIR/prepare"
+
+      - name: Publish to R2
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: bash scripts/publish.sh "$WORK_DIR/out"
+
+      - name: Callback (succeeded)
+        env:
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+        run: node scripts/callback.mjs success "$WORK_DIR/out"
+
+      - name: Callback (failed)
+        if: ${{ failure() }}
+        env:
+          CLIPPER_CALLBACK_SECRET: ${{ secrets.CLIPPER_CALLBACK_SECRET }}
+        run: node scripts/callback.mjs failed

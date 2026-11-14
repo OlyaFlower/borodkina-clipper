@@ -1,0 +1,145 @@
+"""Unit tests of motion/prepare/prepare.py that need no model: python -I tests/motion_prepare_test.py
+(with the prepare venv's python, see scripts/motion-prepare.sh --setup)."""
+
+import os
+import sys
+import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "motion", "prepare"))
+
+import numpy as np  # noqa: E402
+from PIL import Image  # noqa: E402
+
+import prepare  # noqa: E402
+
+
+class FakeInput:
+    name = "pixel_values"
+
+
+class RampDepth:
+    """Stands in for the depth model: depth rises from left to right."""
+
+    def get_inputs(self):
+        return [FakeInput()]
+
+    def run(self, _outputs, feeds):
+        _, _, h, w = feeds["pixel_values"].shape
+        return [np.tile(np.linspace(0, 10, w, dtype=np.float32), (h, 1))[None]]
+
+
+def test_faces_are_flat_in_depth():
+    frame = Image.new("RGB", (prepare.W, prepare.H), (90, 90, 90))
+    framing = {"mode": "crop", "coverBox": [0, 0, prepare.W, prepare.H]}
+    face = {"x": 800, "y": 300, "w": 240, "h": 300, "score": 0.9}
+    d = prepare.estimate_depth(RampDepth(), frame, framing, [face])
+    sx, sy = prepare.DEPTH_OUT[0] / prepare.W, prepare.DEPTH_OUT[1] / prepare.H
+    core = d[int(360 * sy) : int(560 * sy), int(860 * sx) : int(980 * sx)]
+    assert core.std() < 1e-3, f"face depth is not flat: std {core.std()}"
+    assert d[:, 10].mean() < 0.1 and d[:, -10].mean() > 0.9, "the ramp outside the face must stay"
+
+
+def test_crop_keeps_faces_in_frame():
+    img = Image.new("RGB", (1600, 1000), (40, 40, 40))  # 16:10, cropped to 16:9
+    face = {"x": 20, "y": 20, "w": 120, "h": 150, "score": 0.9}
+    frame, framing, faces, background = prepare.frame_cover(img, [face])
+    assert frame.size == (1920, 1080) and framing["mode"] == "crop" and background is None
+    assert framing["sourceBox"][1] == 0, "a face at the top must pull the crop window up"
+    f = faces[0]
+    assert f["x"] >= 0 and f["y"] >= 0 and f["x"] + f["w"] <= 1920 and f["y"] + f["h"] <= 1080
+
+
+def test_portrait_is_extended_not_cropped():
+    img = Image.new("RGB", (800, 1000), (200, 100, 50))
+    frame, framing, _, background = prepare.frame_cover(img, [])
+    assert framing["mode"] == "extend" and background is not None
+    x0, y0, x1, y1 = framing["coverBox"]
+    assert y1 - y0 == round(1080 * prepare.EXTEND_SCALE) and abs((x1 - x0) / (y1 - y0) - 0.8) < 0.01
+    assert frame.getpixel(((x0 + x1) // 2, (y0 + y1) // 2)) == (200, 100, 50)
+
+
+def test_letterbox_bars_are_trimmed_only_in_pairs():
+    pic = np.full((1000, 1600, 3), 120, np.uint8)
+    pic[:, ::7] = 200  # some texture
+    boxed = pic.copy()
+    boxed[:100] = 0
+    boxed[-100:] = 0
+    trimmed, box = prepare.trim_bars(Image.fromarray(boxed))
+    assert box is not None and abs(box[1] - 100) <= 4 and abs(1000 - box[3] - 100) <= 4, box
+    one_side = pic.copy()
+    one_side[:150] = 0  # a black sky, not a letterbox
+    _, box = prepare.trim_bars(Image.fromarray(one_side))
+    assert box is None
+
+
+def test_palette_is_deterministic():
+    rng = np.random.default_rng(1)
+    img = Image.fromarray(rng.integers(0, 255, (270, 480, 3), dtype=np.uint8)).resize((1920, 1080))
+    a, b = prepare.palette(img), prepare.palette(img)
+    assert a == b and len(a["colors"]) == 5
+    assert abs(sum(c["share"] for c in a["colors"]) - 1) < 0.01
+
+
+def test_occlusion_plate_repaints_behind_thin_near_things():
+    pic = np.zeros((prepare.H, prepare.W, 3), np.float32)
+    pic[...] = (200, 120, 160)  # a pink stage behind
+    pic[200:900, 940:964] = (10, 10, 12)  # a thin dark pole in front
+    depth = np.full((prepare.H, prepare.W), 0.1, np.float32)
+    depth[200:900, 940:964] = 0.9
+    plate, plate_depth, share = prepare.occlusion_plate(Image.fromarray(pic.astype(np.uint8)), depth)
+    assert 0 < share < 0.2
+    assert np.abs(plate[550, 945:960].astype(np.float32) - (200, 120, 160)).max() < 12, plate[550, 945:960]
+    assert plate_depth[550, 950] < 0.2, plate_depth[550, 950]
+    assert (plate[50, 50] == (200, 120, 160)).all() and abs(plate_depth[50, 50] - 0.1) < 1e-6, "far from the pole nothing changes"
+
+
+def test_near_edges_grow_past_the_outline():
+    d = np.full((60, 80), 0.1, np.float32)
+    d[20:40, 30:34] = 0.8  # a thin near stick
+    g = prepare.grow_near_edges(d)
+    assert g[30, 28] > 0.6 and g[30, 35] > 0.6, "the stick's depth reaches 2 px past its outline"
+    assert abs(g[30, 50] - 0.1) < 1e-6, "far from the stick nothing changes"
+    assert g[30, 31] > 0.79, "inside the stick the depth stays"
+
+
+def test_salient_edges_find_outlines_not_grain():
+    rng = np.random.default_rng(3)
+    flat = (90 + rng.normal(0, 3, (prepare.H, prepare.W, 1))).clip(0, 255).repeat(3, 2).astype(np.uint8)
+    depth = np.full((prepare.H, prepare.W), 0.3, np.float32)
+    assert prepare.salient_edges(Image.fromarray(flat), depth).max() < 0.2, "grain is not a line"
+    boxed = flat.copy()
+    boxed[300:700, 600:1300] = 220
+    e = prepare.salient_edges(Image.fromarray(boxed), depth)
+    assert e[300:700, 597:604].max() > 0.5 and e[480:520, 900:1000].max() < 0.1
+
+
+def test_light_sources_and_tone():
+    pic = np.full((prepare.H, prepare.W, 3), 20, np.float32)
+    ys, xs = np.mgrid[0 : prepare.H, 0 : prepare.W]
+    spot = np.exp(-(((xs - 1400) / 60.0) ** 2 + ((ys - 300) / 60.0) ** 2))
+    pic = (pic + spot[..., None] * 235).clip(0, 255).astype(np.uint8)
+    lights = prepare.light_sources(Image.fromarray(pic))
+    assert lights and abs(lights[0]["x"] - 1400 / 1920) < 0.03 and abs(lights[0]["y"] - 300 / 1080) < 0.04, lights
+    assert prepare.tone(Image.fromarray(pic))["key"] == "dark"
+    assert prepare.tone(Image.new("RGB", (1920, 1080), (230, 225, 220)))["key"] == "light"
+
+
+def test_non_image_is_source_invalid():
+    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as fh:
+        fh.write(b"\xff\xd8\xff not really a jpeg")
+    try:
+        prepare.load_cover(fh.name)
+    except prepare.SourceInvalid:
+        pass
+    else:
+        raise AssertionError("a broken JPEG must be source_invalid")
+    finally:
+        os.unlink(fh.name)
+
+
+if __name__ == "__main__":
+    tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
+    for t in tests:
+        t()
+        print(f"ok {t.__name__}")
+    print(f"{len(tests)} prepare tests passed")

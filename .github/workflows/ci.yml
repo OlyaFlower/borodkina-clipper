@@ -19,8 +19,21 @@ jobs:
         run: shellcheck -x scripts/*.sh tests/*.sh
       - name: Input validation tests
         run: bash tests/validate.test.sh
-      - name: Node syntax check
-        run: node --check scripts/callback.mjs && node --check tests/callback-server.mjs
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - name: Node and Python syntax check
+        run: |
+          node --check scripts/callback.mjs && node --check tests/callback-server.mjs
+          for f in motion/kit/lib/*.js motion/kit/blocks/*.js motion/kit/*.mjs motion/kit/test/*.mjs; do node --check "$f"; done
+          python3 -m py_compile motion/prepare/prepare.py scripts/motion-measure.py tests/motion_prepare_test.py tests/fixtures/motion/make-fixtures.py
+      # The kit's unit tests (schema generated from the blocks, presets valid, every block at rest at 0 and
+      # 8 s, rhythms and cameras loop-safe, chooser) and every preset spec against scene.schema.json.
+      - name: Motion kit unit tests and preset schema validation
+        run: |
+          npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+          node motion/kit/test/kit.test.mjs
+          for f in motion/kit/presets/*.json; do node motion/kit/validate.mjs "$f"; done
 
   encode-and-publish:
     runs-on: ubuntu-latest
@@ -71,3 +84,127 @@ jobs:
           exit 1
       - name: Publish and callback against the S3 stand-in
         run: bash tests/publish-callback.test.sh "$RUNNER_TEMP/out"
+
+  # The fallback motion pipeline on the generated covers (tests/fixtures/motion), directly on the runner
+  # (headless Chrome, software WebGL, no Docker): prepare, the chosen or named preset, render, encode,
+  # verify and the quality gates. Each fixture with the chooser's preset (auto: concert-glow, poster-float,
+  # sunlit-depth, night-stage, intimate-portrait), and the other presets where they belong (night-stage on
+  # the stage, pencil-reveal on the landscape, sunlit-depth on the stage). Timings go to the job summary;
+  # the five gate snapshots (0, 2, 4, 6, 8 s) of each render are kept as an artifact for review.
+  motion-render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { fixture: stage, preset: auto }
+          - { fixture: poster, preset: auto }
+          - { fixture: landscape, preset: auto }
+          - { fixture: flat, preset: auto }
+          - { fixture: portrait, preset: auto }
+          - { fixture: stage, preset: night-stage }
+          - { fixture: landscape, preset: pencil-reveal }
+          - { fixture: stage, preset: sunlit-depth }
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.tools/bin
+      FIXTURE: ${{ matrix.fixture }}
+      PRESET: ${{ matrix.preset }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/borodkina-motion
+          key: motion-prepare-${{ runner.os }}-${{ hashFiles('motion/prepare/requirements.txt', 'motion/prepare/models.env') }}
+      - name: Install pinned ffmpeg and HyperFrames
+        run: |
+          bash scripts/install-tools.sh ffmpeg
+          npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+      - name: Prepare, render, encode, verify and gate the fixture cover
+        env:
+          SNAPSHOT_DIR: ${{ runner.temp }}/snapshots
+        run: bash tests/motion-kit.test.sh "$FIXTURE" "$PRESET"
+      - name: Keep the fixture snapshots for review
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: motion-snapshots-${{ matrix.fixture }}-${{ matrix.preset }}
+          path: ${{ runner.temp }}/snapshots
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Every preset on every fixture, snapshots only (no full render): frame 0 is the cover, 8 s equals 0 s,
+  # it moves. The five snapshots of each pair are kept as one artifact for review.
+  motion-presets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/borodkina-motion
+          key: motion-prepare-${{ runner.os }}-${{ hashFiles('motion/prepare/requirements.txt', 'motion/prepare/models.env') }}
+      - name: Install HyperFrames
+        run: npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+      - name: Snapshot every preset on every fixture
+        run: bash tests/motion-presets.test.sh "$RUNNER_TEMP/preset-snapshots"
+      - name: Keep the preset snapshots for review
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: motion-preset-snapshots
+          path: ${{ runner.temp }}/preset-snapshots
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # scripts/motion-decide.sh, the choice after motion.yml's Claude author step, on the prepared stage
+  # fixture. Claude is never called: its output is simulated. fallback: no work/scene.json; claude: a
+  # hand-written scene with a custom block is rendered and gated as Claude's (and motion-author-setup.sh);
+  # invalid: broken scenes and unsafe blocks are refused and the fallback is rendered.
+  motion-decide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [fallback, claude, invalid]
+    env:
+      TOOLS_DIR: ${{ github.workspace }}/.tools/bin
+      DECIDE_CASE: ${{ matrix.case }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/borodkina-motion
+          key: motion-prepare-${{ runner.os }}-${{ hashFiles('motion/prepare/requirements.txt', 'motion/prepare/models.env') }}
+      - name: Install pinned ffmpeg, Bun and HyperFrames
+        run: |
+          bash scripts/install-tools.sh ffmpeg bun
+          "$TOOLS_DIR/bun" --version
+          npm ci --prefix motion --ignore-scripts --no-audit --no-fund
+      - name: Decide between Claude's composition and the fallback
+        run: bash tests/motion-decide.test.sh "$DECIDE_CASE"
