@@ -161,6 +161,8 @@ jobs:
           author="$GITHUB_WORKSPACE/work"
           if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
             echo "::warning::The author step changed the checkout outside work/; its composition is ignored"
+            # Paths only (no contents), at most 20, printable characters only: enough to find the cause.
+            git status --porcelain --untracked-files=all | head -n 20 | LC_ALL=C tr -cd '[:print:]\n' | sed 's/^/  changed: /'
             author="$WORK_DIR/no-author"
           fi
           bash scripts/motion-decide.sh "$author" "$WORK_DIR/prepare"
