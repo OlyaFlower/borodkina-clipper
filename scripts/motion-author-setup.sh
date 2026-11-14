@@ -3,11 +3,13 @@
 # Sets up the Claude author step of motion.yml. In <author-root> (the checkout: Claude's working directory)
 # it creates, replacing what is there:
 #   prepare/         a copy of the prepared cover (the output of motion-prepare.sh)
-#   brief.json       a copy of the brief
+#   brief.json       a copy of the brief, without its "style" when that is not a string of at most 1000
+#                    characters (scripts/motion-brief.sh warns about it)
 #   work/            empty; Claude writes work/scene.json, optional work/blocks/<name>.js and work/REVIEW.md
 #   .claude/skills/  the authoring skill (motion/skills/borodkina-motion) and the official HyperFrames skills
 #                    shipped in the pinned hyperframes package (motion/package-lock.json): hyperframes and
 #                    hyperframes-cli. Nothing is downloaded.
+# The workflow runs this only when the brief's authoring is not "preset" (scripts/motion-brief.sh).
 # Prints the model: the brief's optional "model" when it is on the allow-list below, else the default, and
 # writes CLAUDE_MODEL=<model> to $GITHUB_ENV when that is set. Nothing else from the brief is printed.
 set -euo pipefail
@@ -30,7 +32,8 @@ fi
 [[ -s "$prepared/meta.json" ]] || { echo "motion-author-setup: $prepared/meta.json is missing" >&2; exit 1; }
 rm -rf "$dest/prepare" "$dest/work" "$dest/brief.json"
 cp -R "$prepared" "$dest/prepare"
-cp "$brief" "$dest/brief.json"
+jq 'if type == "object" and .style != null and ((.style | type) != "string" or (.style | length) > 1000)
+  then del(.style) else . end' "$brief" > "$dest/brief.json"
 mkdir -p "$dest/work"
 
 skills="$dest/.claude/skills"
