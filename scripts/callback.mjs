@@ -2,7 +2,12 @@
 // Usage: node callback.mjs success <outdir>   (merges $WORK_DIR/motion.json as "motion" if present)
 //        node callback.mjs failed            (reads $WORK_DIR/error-code and error-message if present)
 // Env: CALLBACK_URL CLIPPER_ENV CLIPPER_CALLBACK_SECRET DURATION_SEC [WORK_DIR]
-// Posts a signed JSON callback to the admin. No dependencies. Never prints the secret or the signature.
+// Posts a signed JSON callback to the admin. No dependencies. Never prints the secret or the signatures.
+// Two signatures, one timestamp (x-clipper-timestamp):
+//   x-clipper-signature     HMAC(secret, `${timestamp}.${rawBody}`)          legacy, names no job
+//   x-clipper-signature-v2  HMAC(secret, `${timestamp}.${jobId}.${rawBody}`) valid for this job only
+// jobId is the <id> of the callback URL path /video-jobs/<id>/callback. Both are sent until every admin
+// verifies the v2 header; then the legacy one can go.
 import { createHmac } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -21,6 +26,7 @@ const DEFAULT_MESSAGES = {
 };
 const AUTHORING = ['fallback', 'claude'];
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,99}$/;
+const JOB_PATH = /\/video-jobs\/([A-Za-z0-9_-]{1,64})\/callback$/;
 
 function die(message) {
   console.error(`callback: ${message}`);
@@ -35,6 +41,26 @@ function callbackUrl() {
   if (!prefix || !url.startsWith(prefix)) die('callback URL is not allowed for this environment');
   if (!/^[A-Za-z0-9_./-]*$/.test(url.slice(prefix.length)) || url.includes('..')) die('callback URL is not allowed');
   return url;
+}
+
+// The job the callback is for: the <id> of /video-jobs/<id>/callback. When JOB_ID is set (the workflows set
+// it) it must be the same id, so a delivery is never signed for another job.
+function callbackJobId(url, expected = process.env.JOB_ID) {
+  let path;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return die('callback URL is not a URL');
+  }
+  const jobId = path.match(JOB_PATH)?.[1];
+  if (!jobId) die('callback URL names no job (expected /video-jobs/<id>/callback)');
+  if (expected && expected !== jobId) die('callback URL names another job than JOB_ID');
+  return jobId;
+}
+
+function sign(secret, timestamp, jobId, rawBody) {
+  const mac = (text) => createHmac('sha256', secret).update(text).digest('hex');
+  return { legacy: mac(`${timestamp}.${rawBody}`), v2: mac(`${timestamp}.${jobId}.${rawBody}`) };
 }
 
 function readOptional(path) {
@@ -111,13 +137,14 @@ async function main() {
   const secret = process.env.CLIPPER_CALLBACK_SECRET;
   if (!secret) die('CLIPPER_CALLBACK_SECRET is not set');
   const url = callbackUrl();
+  const jobId = callbackJobId(url);
   const rawBody = JSON.stringify(buildBody(process.argv[2], process.argv[3]));
   const baseDelay = Number(process.env.CLIPPER_RETRY_DELAY_MS ?? 2000);
   const attempts = 4; // first try plus 3 retries
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const timestamp = String(Math.floor(Date.now() / 1000));
-    const signature = createHmac('sha256', secret).update(`${timestamp}.${rawBody}`).digest('hex');
+    const signature = sign(secret, timestamp, jobId, rawBody);
     let retry = true;
     try {
       const response = await fetch(url, {
@@ -126,7 +153,8 @@ async function main() {
         headers: {
           'content-type': 'application/json',
           'x-clipper-timestamp': timestamp,
-          'x-clipper-signature': signature,
+          'x-clipper-signature': signature.legacy,
+          'x-clipper-signature-v2': signature.v2,
         },
         body: rawBody,
         signal: AbortSignal.timeout(20000),

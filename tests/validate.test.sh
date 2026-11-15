@@ -14,7 +14,7 @@ PROD='https://admin.borodkinamusic.com/api/v1/video-jobs/'
 run() {
   local expect="$1" label="$2"; shift 2
   local -a base=(
-    "JOB_ID=job_1-A" "MEDIA_ID=media-1" "CLIPPER_ENV=dev" "YOUTUBE_VIDEO_ID=dQw4w9WgXcQ"
+    "JOB_ID=job_1-A" "MEDIA_ID=med_vid_0a1b2c3d4e" "CLIPPER_ENV=dev" "YOUTUBE_VIDEO_ID=dQw4w9WgXcQ"
     "SOURCE_KEY=" "START_SEC=10" "DURATION_SEC=8" "CALLBACK_URL=${DEV}job_1-A/callback"
   )
   local -a final=() item key skip
@@ -29,7 +29,7 @@ run() {
 }
 
 run ok "baseline youtube"
-run ok "prod env" CLIPPER_ENV=prod "CALLBACK_URL=${PROD}x/callback"
+run ok "prod env" CLIPPER_ENV=prod "CALLBACK_URL=${PROD}job_1-A/callback"
 run ok "source file" YOUTUBE_VIDEO_ID= SOURCE_KEY=sources/abc_DEF-1
 run ok "start 0 / duration 5" START_SEC=0 DURATION_SEC=5
 run ok "start 86400 / duration 10" START_SEC=86400 DURATION_SEC=10
@@ -42,6 +42,12 @@ run fail "jobId backtick" 'JOB_ID=a`id`'
 run fail "jobId semicolon" 'JOB_ID=a;rm -rf /'
 run fail "jobId newline" "JOB_ID=$(printf 'abc\nWORK=1')"
 run fail "mediaId slash" MEDIA_ID=../etc
+run fail "mediaId not a video media id" MEDIA_ID=media-1
+run fail "mediaId uppercase hex" MEDIA_ID=med_vid_0A1B2C3D4E
+run fail "mediaId 9 hex digits" MEDIA_ID=med_vid_0a1b2c3d4
+run fail "mediaId 11 hex digits" MEDIA_ID=med_vid_0a1b2c3d4e5
+run fail "mediaId other prefix" MEDIA_ID=med_img_0a1b2c3d4e
+run fail "mediaId trailing newline" "MEDIA_ID=$(printf 'med_vid_0a1b2c3d4e\nx')"
 run fail "both youtube and source" SOURCE_KEY=sources/abc
 run fail "neither youtube nor source" YOUTUBE_VIDEO_ID=
 run fail "youtube id too short" YOUTUBE_VIDEO_ID=abc
@@ -60,6 +66,8 @@ run fail "durationSec 11" DURATION_SEC=11
 run fail "durationSec text" DURATION_SEC=eight
 run fail "env staging" CLIPPER_ENV=staging
 run fail "env empty" CLIPPER_ENV=
+run fail "env uppercase" CLIPPER_ENV=PROD
+run fail "env with suffix" CLIPPER_ENV=prod-2
 run fail "dev env with prod url" "CALLBACK_URL=${PROD}x"
 run fail "prod env with dev url" CLIPPER_ENV=prod "CALLBACK_URL=${DEV}x"
 run fail "callback other host" CALLBACK_URL=https://evil.example/api/v1/video-jobs/x
@@ -71,13 +79,17 @@ run fail "callback traversal" "CALLBACK_URL=${DEV}../../other"
 run fail "callback at sign" "CALLBACK_URL=${DEV}x@evil.example"
 run fail "callback with space" "CALLBACK_URL=${DEV}x y"
 run fail "callback newline" "CALLBACK_URL=$(printf '%sx\nfoo' "$DEV")"
+run fail "callback for another job" "CALLBACK_URL=${DEV}job_2/callback"
+run fail "callback without /callback" "CALLBACK_URL=${DEV}job_1-A"
+run fail "callback extra path" "CALLBACK_URL=${DEV}job_1-A/callback/x"
+run fail "callback bare prefix" "CALLBACK_URL=${DEV}"
 
 # ---- motion mode: jobId, mediaId, env, sourceKey (required), callbackUrl. No YouTube, start or duration.
 # mrun <expect ok|fail> <label> [VAR=value overrides...]
 mrun() {
   local expect="$1" label="$2"; shift 2
   local -a base=(
-    "JOB_ID=job_1-A" "MEDIA_ID=media-1" "CLIPPER_ENV=dev" "SOURCE_KEY=sources/cover_1-A"
+    "JOB_ID=job_1-A" "MEDIA_ID=med_vid_0a1b2c3d4e" "CLIPPER_ENV=dev" "SOURCE_KEY=sources/cover_1-A"
     "CALLBACK_URL=${DEV}job_1-A/callback"
   )
   local -a final=() item key skip
@@ -92,7 +104,7 @@ mrun() {
 }
 
 mrun ok "baseline"
-mrun ok "prod env" CLIPPER_ENV=prod "CALLBACK_URL=${PROD}x/callback"
+mrun ok "prod env" CLIPPER_ENV=prod "CALLBACK_URL=${PROD}job_1-A/callback"
 mrun ok "64-character source id" "SOURCE_KEY=sources/$(printf 'a%.0s' {1..64})"
 mrun ok "youtube id is ignored" YOUTUBE_VIDEO_ID=dQw4w9WgXcQ
 mrun fail "sourceKey missing" SOURCE_KEY=
@@ -106,12 +118,20 @@ mrun fail "sourceKey newline" "SOURCE_KEY=$(printf 'sources/abc\nx')"
 mrun fail "empty jobId" JOB_ID=
 mrun fail "jobId injection" 'JOB_ID=a$(touch pwned)'
 mrun fail "mediaId slash" MEDIA_ID=../etc
+mrun fail "mediaId not a video media id" MEDIA_ID=media-1
+run fail "mediaId not a video media id" MEDIA_ID=media-1
+run fail "mediaId uppercase hex" MEDIA_ID=med_vid_0A1B2C3D4E
+run fail "mediaId 9 hex digits" MEDIA_ID=med_vid_0a1b2c3d4
+run fail "mediaId 11 hex digits" MEDIA_ID=med_vid_0a1b2c3d4e5
+run fail "mediaId other prefix" MEDIA_ID=med_img_0a1b2c3d4e
+run fail "mediaId trailing newline" "MEDIA_ID=$(printf 'med_vid_0a1b2c3d4e\nx')"
 mrun fail "env staging" CLIPPER_ENV=staging
 mrun fail "dev env with prod url" "CALLBACK_URL=${PROD}x"
 mrun fail "prod env with dev url" CLIPPER_ENV=prod "CALLBACK_URL=${DEV}x"
 mrun fail "callback other host" CALLBACK_URL=https://evil.example/api/v1/video-jobs/x
 mrun fail "callback query" "CALLBACK_URL=${DEV}x?a=b"
 mrun fail "callback traversal" "CALLBACK_URL=${DEV}../../other"
+mrun fail "callback for another job" "CALLBACK_URL=${DEV}job_2/callback"
 
 if env -i PATH="$PATH" bash "$script" bogus >/dev/null 2>&1; then
   echo "FAIL: unknown mode must be refused"; failures=$((failures + 1))

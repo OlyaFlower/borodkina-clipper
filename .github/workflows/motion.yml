@@ -10,11 +10,11 @@ on:
         required: true
         type: string
       mediaId:
-        description: Media id (A-Z a-z 0-9 _ -, 1-64)
+        description: Video media id, med_vid_ and 10 lowercase hex digits; must not exist in R2 yet
         required: true
         type: string
       env:
-        description: dev or prod
+        description: dev or prod (selects the GitHub Environment and its secrets)
         required: true
         type: string
       sourceKey:

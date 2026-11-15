@@ -12,15 +12,19 @@ Workflow `.github/workflows/clip.yml`, `workflow_dispatch` inputs (all strings):
 
 | Input | Rule |
 | --- | --- |
-| `jobId`, `mediaId` | `^[A-Za-z0-9_-]{1,64}$` |
+| `jobId` | `^[A-Za-z0-9_-]{1,64}$` |
+| `mediaId` | `^med_vid_[0-9a-f]{10}$` (the admin's video media ids); nothing may exist under `videos/<mediaId>/` yet |
 | `env` | `dev` or `prod` (also selects the GitHub Environment) |
 | `youtubeVideoId` | optional, `^[A-Za-z0-9_-]{11}$` |
 | `sourceKey` | optional, `^sources/[A-Za-z0-9_-]{1,64}$`; exactly one of `youtubeVideoId` and `sourceKey` |
 | `startSec` | integer 0..86400 |
 | `durationSec` | integer 5..10 |
-| `callbackUrl` | must start with `https://dev-admin.borodkinamusic.com/api/v1/video-jobs/` (dev) or `https://admin.borodkinamusic.com/api/v1/video-jobs/` (prod) |
+| `callbackUrl` | exactly `https://dev-admin.borodkinamusic.com/api/v1/video-jobs/<jobId>/callback` (dev) or `https://admin.borodkinamusic.com/api/v1/video-jobs/<jobId>/callback` (prod) |
 
-Output in R2, bucket `R2_BUCKET`, under `videos/<mediaId>/`, with `Cache-Control: public, max-age=31536000, immutable`:
+Output in R2, bucket `R2_BUCKET`, under `videos/<mediaId>/`, with `Cache-Control: public, max-age=31536000, immutable`.
+`scripts/publish.sh` never overwrites: it refuses when any object already exists under `videos/<mediaId>/`, and
+uploads each file with a conditional put (`If-None-Match: *`), so an object written in the meantime is not replaced
+either (HTTP 412). The job then fails with `encode_failed`.
 
 - `1280.av1.webm` (1280x720, SVT-AV1 preset 6, crf 36, about 1000 kbps cap) and `640.av1.webm` (640x360, 400 kbps cap). Optional: dropped if they fail or exceed 4 MiB.
 - `1280.h264.mp4` (High, level 3.2, crf 23, max 2 Mbps) and `640.h264.mp4` (level 3.0, max 800 kbps), `+faststart`. Required.
@@ -29,7 +33,14 @@ Output in R2, bucket `R2_BUCKET`, under `videos/<mediaId>/`, with `Cache-Control
 All videos are 30 fps, yuv420p, keyframe every 60 frames, no audio stream, duration within 0.15 s of `durationSec`, at most 4 MiB.
 
 Callback: `POST callbackUrl`, JSON body, headers `content-type: application/json`, `x-clipper-timestamp` (unix seconds) and
-`x-clipper-signature` = lowercase hex `HMAC-SHA256(CLIPPER_CALLBACK_SECRET, timestamp + "." + rawBody)`.
+two signatures over that one timestamp, each a lowercase hex `HMAC-SHA256` keyed with `CLIPPER_CALLBACK_SECRET`:
+
+- `x-clipper-signature` of `timestamp + "." + rawBody` (legacy: it names no job, so it would verify on any job's URL);
+- `x-clipper-signature-v2` of `timestamp + "." + jobId + "." + rawBody`, `jobId` the `<id>` of the callback URL path
+  `/video-jobs/<id>/callback` (it must equal `JOB_ID`; a URL without one is refused before sending).
+
+An admin that knows only the legacy header ignores the v2 one; an admin that checks v2 needs nothing else. The legacy
+header is removed once every admin verifies v2.
 Retried 3 times with backoff on network errors and 5xx.
 
 ```json
@@ -51,7 +62,8 @@ It uses the same GitHub Environments, secrets, R2 layout, renditions and callbac
 
 | Input | Rule |
 | --- | --- |
-| `jobId`, `mediaId` | `^[A-Za-z0-9_-]{1,64}$` |
+| `jobId` | `^[A-Za-z0-9_-]{1,64}$` |
+| `mediaId` | `^med_vid_[0-9a-f]{10}$` (the admin's video media ids); nothing may exist under `videos/<mediaId>/` yet |
 | `env` | `dev` or `prod` (also selects the GitHub Environment) |
 | `sourceKey` | `^sources/[A-Za-z0-9_-]{1,64}$` |
 | `callbackUrl` | same rule as `clip` |
@@ -259,6 +271,20 @@ exhausts it, so the VM freezes on `[download] Destination: …` and the `contain
 - The repository is public, so Actions logs are public. Nothing secret is printed; secrets are only set on the steps that need them.
 - The only inputs are IDs and numbers. Each is validated by `scripts/validate-inputs.sh` before use, and inputs reach scripts only through `env:`, never through `${{ }}` inside `run:`.
 - `callback.mjs` refuses any URL outside the allowed admin prefix for the environment, so the signing secret cannot be sent elsewhere.
+  Its `x-clipper-signature-v2` names the job, so a delivery cannot be replayed onto another job's URL.
+- Whoever can dispatch a workflow chooses `env` (and with it the GitHub Environment and its R2 and callback secrets) and
+  `mediaId`. The scripts limit what that can do: `env` is `dev` or `prod` only, `mediaId` is a video media id, the
+  callback URL is the one of `jobId`, and `publish.sh` never overwrites an existing object, so a dispatch cannot replace
+  a published video. It can still upload new objects under a fresh media id in the chosen environment.
+- What the scripts cannot enforce is a repository-settings matter, not changed by this repo's code:
+  - Environment protection rules for `prod` (Settings, Environments): deployment branches limited to `main`, and,
+    if wanted, required reviewers or a custom protection rule, so a dispatch on another ref or by another actor does
+    not get the `prod` secrets.
+  - Separate dispatch tokens for the dev and prod admin. A fine-grained token can only be limited per repository
+    (`Actions: read and write`), not per environment, so a leaked dev token can dispatch `env=prod`; only the
+    environment rules above, or a separate repository for prod, close that.
+  - The R2 tokens in each environment: object read and write on that environment's bucket only (listing is needed
+    for the overwrite check).
 - Tools (yt-dlp, ffmpeg) are pinned by version and sha256 in `scripts/versions.env`, the motion prepare packages and models by sha256 in `motion/prepare/`; third-party actions are pinned by commit SHA.
 - The motion author step is the only one with the Claude credential; Claude may only write in `work/` and run
   the kit's own commands, its transcript is never printed, and its output is used only after deterministic checks
