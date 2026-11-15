@@ -6,7 +6,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$here/.."
 out="${1:?encoded outdir}"
 work="$(mktemp -d)"
-export R2_BUCKET=clipper-test MEDIA_ID=media_42 DURATION_SEC=8 CLIPPER_ALLOW_LOCAL_CALLBACK=1
+export R2_BUCKET=clipper-test MEDIA_ID=med_vid_000000042a DURATION_SEC=8 CLIPPER_ALLOW_LOCAL_CALLBACK=1
 export CLIPPER_CALLBACK_SECRET=test-secret-not-real CLIPPER_RETRY_DELAY_MS=50 CLIPPER_ENV=dev
 export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY" AWS_DEFAULT_REGION=auto
 server_pid=""
@@ -25,6 +25,30 @@ for f in 1280.h264.mp4:video/mp4 640.h264.mp4:video/mp4 poster.webp:image/webp 1
   [[ "$(jq -r .ContentLength <<<"$head")" == "$(stat -c %s "$out/$name")" ]] || { echo "wrong size for $name"; exit 1; }
 done
 echo "publish ok"
+
+# ---- publish never overwrites: a second publish of the same media id fails and leaves every object as it was
+etags() {
+  aws --endpoint-url "$R2_ENDPOINT" s3api list-objects-v2 --bucket "$R2_BUCKET" --prefix "videos/$1/" \
+    --query 'Contents[].[Key,ETag,LastModified]' --output text
+}
+before="$(etags "$MEDIA_ID")"
+if bash "$root/scripts/publish.sh" "$out" 2>/dev/null; then echo "a second publish of $MEDIA_ID must fail"; exit 1; fi
+[[ "$(etags "$MEDIA_ID")" == "$before" ]] || { echo "a refused publish changed objects"; exit 1; }
+# One object of the media id is enough to refuse (an AV1 file the first job did not have must not be added).
+aws --endpoint-url "$R2_ENDPOINT" s3 cp "$out/poster.webp" "s3://$R2_BUCKET/videos/med_vid_000000042b/poster.webp" >/dev/null
+if MEDIA_ID=med_vid_000000042b bash "$root/scripts/publish.sh" "$out" 2>/dev/null; then
+  echo "a media id with any object must be refused"; exit 1
+fi
+[[ "$(etags med_vid_000000042b | wc -l | tr -d ' ')" == 1 ]] || { echo "a refused publish added objects"; exit 1; }
+# The conditional put publish.sh uses is refused by the store when the key exists (the race after the check).
+if aws --endpoint-url "$R2_ENDPOINT" s3api put-object --bucket "$R2_BUCKET" --key "videos/$MEDIA_ID/poster.webp" \
+  --body "$out/poster.webp" --if-none-match '*' >/dev/null 2>"$work/412.err"; then
+  echo "a conditional put over an existing object must fail"; exit 1
+fi
+grep -q 'PreconditionFailed\|412' "$work/412.err" || { echo "expected 412 Precondition Failed"; cat "$work/412.err"; exit 1; }
+[[ "$(etags "$MEDIA_ID")" == "$before" ]] || { echo "a conditional put changed an object"; exit 1; }
+if MEDIA_ID=media_42 bash "$root/scripts/publish.sh" "$out" 2>/dev/null; then echo "a non-video media id must be refused"; exit 1; fi
+echo "publish refuses to overwrite ok"
 
 # ---- source download path (file mode)
 aws --endpoint-url "$R2_ENDPOINT" s3 cp "$out/1280.h264.mp4" "s3://$R2_BUCKET/sources/abc_1" >/dev/null
@@ -81,6 +105,27 @@ jq -e '.status=="succeeded" and .durationMs==8000 and (.poster.bytes>0)
   and ([.renditions[].file]|index("1280.h264.mp4")!=null) and (.renditions|all(.bytes>0))' \
   "$work/recv/received-1.json" >/dev/null || { echo "bad success body"; cat "$work/recv/received-1.json"; exit 1; }
 echo "success callback ok (retry after 503 worked)"
+
+# Both signatures share one timestamp; check them with an independent HMAC (openssl), the legacy one as the
+# production admin computes it and v2 as the admin's verifyClipperSignature does.
+{ read -r ts; read -r legacy; read -r v2; read -r job; } < "$work/recv/received-1.headers"
+hmac() { printf '%s' "$1" | openssl dgst -sha256 -hmac "$CLIPPER_CALLBACK_SECRET" | awk '{print $NF}'; }
+body="$(cat "$work/recv/received-1.json")"
+[[ "$job" == job1 ]] || { echo "server saw job $job"; exit 1; }
+[[ "$legacy" == "$(hmac "$ts.$body")" ]] || { echo "x-clipper-signature is not HMAC(ts.body)"; exit 1; }
+[[ "$v2" == "$(hmac "$ts.job1.$body")" ]] || { echo "x-clipper-signature-v2 is not HMAC(ts.jobId.body)"; exit 1; }
+[[ "$legacy" != "$v2" ]] || { echo "the two signatures must differ"; exit 1; }
+echo "dual signature ok"
+
+# No job in the URL, or a job other than JOB_ID: refused before anything is sent.
+if CALLBACK_URL=http://127.0.0.1:18080/api/v1/video-jobs/job1 node "$root/scripts/callback.mjs" failed 2>"$work/nojob.err"; then
+  echo "a callback URL without /video-jobs/<id>/callback must be refused"; exit 1
+fi
+grep -q 'names no job' "$work/nojob.err" || { echo "expected a clear no-job message"; cat "$work/nojob.err"; exit 1; }
+if JOB_ID=job2 node "$root/scripts/callback.mjs" failed 2>/dev/null; then
+  echo "a callback URL for another job than JOB_ID must be refused"; exit 1
+fi
+[[ ! -e "$work/recv/received-2.json" ]] || { echo "a refused callback was sent"; exit 1; }
 
 mkdir "$work/wd"; echo youtube_blocked > "$work/wd/error-code"; echo "blocked" > "$work/wd/error-message"
 WORK_DIR="$work/wd" node "$root/scripts/callback.mjs" failed
