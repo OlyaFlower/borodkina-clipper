@@ -5,12 +5,12 @@
 # so an object that appears in the meantime is not replaced either (HTTP 412). The admin gives every job a new
 # media id, so a legitimate job never meets an existing object; a dispatch that names an existing media id
 # (for example someone else's video in prod) fails here without touching it.
-# Env: MEDIA_ID R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET (R2_ENDPOINT overrides, for tests).
+# Env: MEDIA_ID R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET (R2_ENDPOINT: see r2-endpoint.sh).
 set -euo pipefail
 out="$1"
 media="${MEDIA_ID:?}"
 [[ "$media" =~ ^med_vid_[0-9a-f]{10}$ ]] || { echo "bad MEDIA_ID" >&2; exit 2; }
-endpoint="${R2_ENDPOINT:-https://${R2_ACCOUNT_ID:?}.eu.r2.cloudflarestorage.com}"
+source "$(dirname "${BASH_SOURCE[0]}")/r2-endpoint.sh"
 export AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?}" AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?}"
 export AWS_DEFAULT_REGION=auto AWS_EC2_METADATA_DISABLED=true
 export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required

@@ -235,10 +235,17 @@ The success callback carries one more field, read from `$WORK_DIR/motion.json` (
 Create two GitHub Environments in the repo settings, `dev` and `prod`, each with these secrets:
 
 - `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET`: an R2 API token with object read and write on that bucket.
-  The endpoint is `https://<account>.eu.r2.cloudflarestorage.com` (EU jurisdiction), region `auto`.
+  Region `auto`. The endpoint defaults to `https://<account>.eu.r2.cloudflarestorage.com` (EU jurisdiction; dev's
+  bucket `borodkina-dev-media`). A bucket in the default jurisdiction (prod's `borodkina-images`) needs the
+  Environment **variable** (not a secret) `R2_ENDPOINT=https://ce97fa14845312464e770346cfe70dd7.r2.cloudflarestorage.com`.
+  The workflows pass it to the scripts; empty or unset means the EU default. `scripts/r2-endpoint.sh` refuses any
+  endpoint other than `https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com` or the `.eu.` form.
 - `CLIPPER_CALLBACK_SECRET`: the same value the admin uses to verify callbacks for that environment.
 - Optional, for the motion author step: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or
   `ANTHROPIC_API_KEY`. Without either, motion jobs render the fallback preset.
+
+The `prod` Environment needs the secrets `CLIPPER_CALLBACK_SECRET`, `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`, `R2_BUCKET`, `CLAUDE_CODE_OAUTH_TOKEN` and the variable `R2_ENDPOINT` above.
 
 The admin dispatches with a fine-grained token that has only `Actions: read and write` on this repository.
 

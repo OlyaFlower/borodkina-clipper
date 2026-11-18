@@ -2,7 +2,7 @@
 # Gets a motion job's inputs from R2 into $WORK_DIR/source and prints nothing secret:
 #   $SOURCE_KEY       -> $WORK_DIR/source/cover       (the event cover: JPEG, PNG or WebP, at most 20 MiB)
 #   $SOURCE_KEY.json  -> $WORK_DIR/source/brief.json  (the brief: a JSON object, at most 64 KiB)
-# Env: WORK_DIR SOURCE_KEY R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET (R2_ENDPOINT overrides, for tests).
+# Env: WORK_DIR SOURCE_KEY R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET (R2_ENDPOINT: see r2-endpoint.sh).
 # On failure writes $WORK_DIR/error-code (source_invalid) and error-message, and exits 1.
 set -euo pipefail
 
@@ -13,7 +13,7 @@ fail() { echo "$1" > "$work/error-message"; echo source_invalid > "$work/error-c
 
 key="${SOURCE_KEY:?}"
 [[ "$key" =~ ^sources/[A-Za-z0-9_-]{1,64}$ ]] || fail "The source key is not valid"
-endpoint="${R2_ENDPOINT:-https://${R2_ACCOUNT_ID:?}.eu.r2.cloudflarestorage.com}"
+source "$(dirname "${BASH_SOURCE[0]}")/r2-endpoint.sh"
 export AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?}" AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?}"
 export AWS_DEFAULT_REGION=auto AWS_EC2_METADATA_DISABLED=true
 export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
