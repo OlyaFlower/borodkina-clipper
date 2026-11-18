@@ -35,7 +35,7 @@ if [[ -n "${YOUTUBE_VIDEO_ID:-}" ]]; then
   [[ -n "$file" ]] || fail source_invalid "yt-dlp produced no file"
   seek=0
 else
-  endpoint="${R2_ENDPOINT:-https://${R2_ACCOUNT_ID:?}.eu.r2.cloudflarestorage.com}"
+  source "$(dirname "${BASH_SOURCE[0]}")/r2-endpoint.sh"
   file="$work/source/file"
   export AWS_ACCESS_KEY_ID="${R2_ACCESS_KEY_ID:?}" AWS_SECRET_ACCESS_KEY="${R2_SECRET_ACCESS_KEY:?}"
   export AWS_DEFAULT_REGION=auto AWS_EC2_METADATA_DISABLED=true

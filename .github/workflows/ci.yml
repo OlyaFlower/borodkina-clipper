@@ -47,6 +47,7 @@ jobs:
       R2_SECRET_ACCESS_KEY: ci-s3-secret-not-real
       R2_ENDPOINT: http://127.0.0.1:9000
       R2_ACCOUNT_ID: unused
+      R2_ENDPOINT_ALLOW_ANY: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
